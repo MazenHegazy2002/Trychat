@@ -129,6 +129,7 @@ export default function SettingsScreen() {
               ? `${mcpServers.length} server${mcpServers.length === 1 ? '' : 's'} · ${Object.values(mcpTools).flat().length} tools`
               : 'Add tools from MCP servers',
           ],
+          ['/store', 'Store', 'Browse plugins, skills and MCP servers'],
           [
             '/plugins',
             'Plugins',

@@ -134,6 +134,21 @@ export default function PluginsScreen() {
           Add skills, commands, agents and tools in one install. Works with Claude Code plugins and marketplaces on GitHub.
         </ScreenIntro>
 
+        <Pressable
+          onPress={() => router.push('/store')}
+          style={[styles.storeCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
+          accessibilityRole="button"
+        >
+          <IconTile name="shopping-bag" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>Browse the Store</Text>
+            <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
+              Anthropic’s marketplaces, skills and the MCP Registry
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={16} />
+        </Pressable>
+
         <SectionLabel>Add from GitHub</SectionLabel>
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
           <TextInput
@@ -476,6 +491,7 @@ function PluginSummary({ plugin, installed }: { plugin: Plugin; installed: Plugi
 }
 
 const styles = StyleSheet.create({
+  storeCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 14, marginBottom: 4 },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 48 },
   errorRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 64 },

@@ -135,7 +135,8 @@ export function expandCommand(cmd: PluginCommand, args: string): string {
  * Matches "/plugin:name args" exactly, or "/name args" when only one plugin has that command.
  */
 export function resolveSlashCommand(text: string, commands: SlashCommand[]): { prompt: string; command: SlashCommand } | null {
-  const m = text.trim().match(/^\/([\w.-]+(?::[\w./-]+)?)(?:\s+([\s\S]*))?$/);
+  // Names may be namespaced more than once, e.g. "/plugin:folder:command".
+  const m = text.trim().match(/^\/([\w.-]+(?::[\w./-]+)*)(?:\s+([\s\S]*))?$/);
   if (!m) return null;
   const [, name, args = ''] = m;
   const exact = commands.find((c) => c.fullName === name);
