@@ -1,12 +1,13 @@
 import { Stack } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel } from '../components/ui';
 import { uid } from '../lib/id';
-import { importSkillFromUrl, STARTER_SKILLS } from '../lib/skills';
+import { findSkills, importSkill, STARTER_SKILLS } from '../lib/skills';
+import type { SkillCandidate } from '../lib/skills';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { Skill } from '../lib/types';
@@ -21,6 +22,9 @@ export default function SkillsScreen() {
   const [importUrl, setImportUrl] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
+  /** Skills found in a repo, waiting for the user to choose which to import. */
+  const [found, setFound] = useState<SkillCandidate[] | null>(null);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
 
   const input = [styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }];
   const starters = STARTER_SKILLS.filter((s) => !skills.some((k) => k.name === s.name));
@@ -29,16 +33,49 @@ export default function SkillsScreen() {
     setImporting(true);
     setImportError('');
     try {
-      const skill = await importSkillFromUrl(importUrl, settings.githubToken);
-      saveSkill(skill);
-      setImportUrl('');
-      setEditing(skill);
+      const candidates = await findSkills(importUrl, settings.githubToken);
+      if (candidates.length === 1) {
+        const skill = await importSkill(candidates[0], importUrl, settings.githubToken);
+        saveSkill(skill);
+        setImportUrl('');
+        setEditing(skill);
+      } else {
+        // Real SKILL.md files are pre-selected; other Markdown files are offered unticked.
+        setChosen(new Set(candidates.filter((c) => c.isSkillFile).map((c) => c.path)));
+        setFound(candidates);
+      }
     } catch (e) {
       setImportError(e instanceof Error ? e.message : String(e));
     } finally {
       setImporting(false);
     }
   };
+
+  const importChosen = async () => {
+    if (!found) return;
+    const picked = found.filter((c) => chosen.has(c.path));
+    setImporting(true);
+    const failed: string[] = [];
+    for (const c of picked) {
+      try {
+        saveSkill(await importSkill(c, importUrl, settings.githubToken));
+      } catch {
+        failed.push(c.name);
+      }
+    }
+    setImporting(false);
+    setFound(null);
+    setImportUrl('');
+    if (failed.length) Alert.alert('Some skills didn’t import', failed.join(', '));
+  };
+
+  const toggle = (path: string) =>
+    setChosen((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -88,7 +125,7 @@ export default function SkillsScreen() {
           <TextInput
             value={importUrl}
             onChangeText={setImportUrl}
-            placeholder="github.com/owner/repo/tree/main/skills/…"
+            placeholder="github.com/owner/repo (any skills repo)"
             placeholderTextColor={theme.faint}
             autoCapitalize="none"
             autoCorrect={false}
@@ -127,6 +164,72 @@ export default function SkillsScreen() {
           </>
         )}
       </KeyboardAwareScrollView>
+
+      <Modal visible={!!found} animationType="slide" onRequestClose={() => setFound(null)}>
+        {found && (
+          <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top + 12 }}>
+            <View style={[styles.modalHeader, { paddingHorizontal: 20 }]}>
+              <Pressable onPress={() => setFound(null)} hitSlop={10} style={styles.headerBtn}>
+                <Text style={{ color: theme.muted, fontSize: 16 }}>Cancel</Text>
+              </Pressable>
+              <Text style={{ color: theme.text, fontSize: 17, fontWeight: '600' }}>Choose skills</Text>
+              <Pressable
+                onPress={() => setChosen(chosen.size === found.length ? new Set() : new Set(found.map((c) => c.path)))}
+                hitSlop={10}
+                style={styles.headerBtn}
+              >
+                <Text style={{ color: theme.primary, fontSize: 15, fontWeight: '600' }}>
+                  {chosen.size === found.length ? 'None' : 'All'}
+                </Text>
+              </Pressable>
+            </View>
+            <Text style={{ color: theme.muted, fontSize: 13, paddingHorizontal: 20, marginTop: 4, marginBottom: 8 }}>
+              {found.some((c) => c.isSkillFile)
+                ? `Found ${found.length} skills in this repo.`
+                : `No SKILL.md files here — pick the Markdown files you want to use as skills.`}
+            </Text>
+            <FlatList
+              data={found}
+              keyExtractor={(c) => c.path}
+              contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
+              renderItem={({ item }) => {
+                const on = chosen.has(item.path);
+                return (
+                  <Pressable
+                    onPress={() => toggle(item.path)}
+                    style={[styles.pickRow, on && { backgroundColor: theme.surface2 }]}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}
+                  >
+                    <View style={[styles.check, { borderColor: on ? theme.accent : theme.oat, backgroundColor: on ? theme.accent : 'transparent' }]}>
+                      {on && <Icon name="check" size={14} color="#FFFFFF" />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      <Text style={{ color: theme.faint, fontSize: 12, fontFamily: 'monospace' }} numberOfLines={1}>
+                        {item.path}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              }}
+            />
+            <View style={{ padding: 16, paddingBottom: insets.bottom + 16 }}>
+              {importing ? (
+                <ActivityIndicator color={theme.primary} style={{ minHeight: 48 }} />
+              ) : (
+                <PillButton
+                  title={chosen.size ? `Import ${chosen.size} skill${chosen.size === 1 ? '' : 's'}` : 'Choose at least one'}
+                  disabled={!chosen.size}
+                  onPress={importChosen}
+                />
+              )}
+            </View>
+          </View>
+        )}
+      </Modal>
 
       <Modal visible={!!editing} animationType="slide" onRequestClose={() => setEditing(null)}>
         {editing && (
@@ -204,6 +307,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 64 },
   headerBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   add: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  pickRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingHorizontal: 12, borderRadius: 12 },
+  check: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   label: { fontSize: 13, marginTop: 16, marginBottom: 6 },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 48 },
