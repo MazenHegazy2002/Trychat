@@ -1,0 +1,69 @@
+name: Android APK
+
+# Builds an installable TryChat APK on every push and on demand
+# (Actions tab → Android APK → Run workflow). Download it from the run's
+# artifacts or from the "TryChat APK" pre-release it creates.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, ccr-3c4f8ca3-5fdilw]
+    paths-ignore: ['**.md', 'bridge/**', 'server/**']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+        env:
+          EXPO_NO_TELEMETRY: 1
+
+      - name: Build release APK
+        working-directory: android
+        # arm64 covers virtually all current Android phones and keeps the build fast.
+        # The release build is signed with the debug key, which is fine for installing it yourself.
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+
+      - name: Name the APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk "TryChat-${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TryChat-apk-${{ github.run_number }}
+          path: TryChat-*.apk
+
+      - name: Publish as a pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: TryChat APK (build ${{ github.run_number }})
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          files: TryChat-*.apk
+          body: |
+            Install on Android: open this page on your phone, download the APK, and allow
+            "Install unknown apps" for your browser when asked.
+            After installing: Settings → add your API key → Test connection → pick a model.
