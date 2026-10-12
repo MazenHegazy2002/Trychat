@@ -8,7 +8,7 @@ import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntr
 import type { IconName } from '../../components/ui';
 import { carryOverSettings, inspectGithubSource, installFromMarketplace } from '../../lib/pluginInstaller';
 import type { MarketplaceEntry, MarketplaceInfo } from '../../lib/pluginInstaller';
-import { missingConfig } from '../../lib/plugins';
+import { findNameConflict, missingConfig, pluginOrigin } from '../../lib/plugins';
 import { useStore } from '../../lib/store';
 import { useTheme } from '../../lib/theme';
 import type { Plugin } from '../../lib/types';
@@ -42,7 +42,7 @@ function withSavedSettings(plugin: Plugin, installed: Plugin[]): Plugin {
 export default function PluginsScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { plugins, settings, installPlugin, updatePlugin } = useStore();
+  const { plugins, settings, installPlugin, updatePlugin, uninstallPlugin } = useStore();
   const [link, setLink] = useState('');
   const [inspecting, setInspecting] = useState(false);
   const [error, setError] = useState('');
@@ -78,12 +78,39 @@ export default function PluginsScreen() {
     }
   };
 
+  /**
+   * Runs `install`, unless a plugin with the same name from another marketplace or repo is installed: their commands,
+   * skills and tools would clash, so the user decides whether this one replaces it.
+   */
+  const replacingSameName = (plugin: Plugin, install: () => void) => {
+    const old = findNameConflict(plugins, plugin);
+    if (!old) return install();
+    Alert.alert(
+      `Replace ${old.displayName ?? old.name} from ${pluginOrigin(old)}?`,
+      `Only one plugin named “${plugin.name}” can be installed. The one from ${pluginOrigin(plugin)} replaces it, and its settings are removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Replace',
+          style: 'destructive',
+          onPress: () => {
+            uninstallPlugin(old.id);
+            install();
+          },
+        },
+      ],
+    );
+  };
+
   const confirmInstall = () => {
     if (!pending) return;
-    installPlugin(pending);
-    setPending(null);
-    setLink('');
-    openPlugin(pending.id);
+    const plugin = pending;
+    replacingSameName(plugin, () => {
+      installPlugin(plugin);
+      setPending(null);
+      setLink('');
+      openPlugin(plugin.id);
+    });
   };
 
   const closeMarket = () => {
@@ -102,19 +129,21 @@ export default function PluginsScreen() {
     try {
       const plugin = await installFromMarketplace(market, entry, token);
       const missing = missingConfig(withSavedSettings(plugin, plugins));
-      installPlugin(plugin);
-      if (missing.length) {
-        Alert.alert(`${plugin.displayName ?? plugin.name} needs setup`, `Add ${missing.join(', ')} so it works.`, [
-          { text: 'Later', style: 'cancel' },
-          {
-            text: 'Set up',
-            onPress: () => {
-              closeMarket();
-              openPlugin(plugin.id);
+      replacingSameName(plugin, () => {
+        installPlugin(plugin);
+        if (missing.length) {
+          Alert.alert(`${plugin.displayName ?? plugin.name} needs setup`, `Add ${missing.join(', ')} so it works.`, [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: 'Set up',
+              onPress: () => {
+                closeMarket();
+                openPlugin(plugin.id);
+              },
             },
-          },
-        ]);
-      }
+          ]);
+        }
+      });
     } catch (e) {
       setEntryErrors((errs) => ({ ...errs, [entry.name]: errorText(e) }));
     } finally {

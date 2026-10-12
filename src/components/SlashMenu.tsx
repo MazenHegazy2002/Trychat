@@ -17,7 +17,7 @@ export function isTypingSlashCommand(text: string): boolean {
 
 export interface SlashMatch {
   command: SlashCommand;
-  /** What goes after the "/" — the short name, or "plugin:name" when two plugins share the name. */
+  /** What goes after the "/" — the short name, or the unique "plugin:name" when "/name" would be ambiguous. */
   token: string;
 }
 
@@ -29,6 +29,7 @@ export function matchSlashCommands(query: string, commands: SlashCommand[]): Sla
   const q = query.trim().toLowerCase();
   const nameCount = new Map<string, number>();
   for (const c of commands) nameCount.set(c.name, (nameCount.get(c.name) ?? 0) + 1);
+  const fullNames = new Set(commands.map((c) => c.fullName));
 
   const ranked: (SlashMatch & { rank: number })[] = [];
   for (const command of commands) {
@@ -41,7 +42,8 @@ export function matchSlashCommands(query: string, commands: SlashCommand[]): Sla
     else if (name.includes(q)) rank = 3;
     else if (full.includes(q)) rank = 4;
     else continue;
-    const token = (nameCount.get(command.name) ?? 0) > 1 ? command.fullName : command.name;
+    // "/name" must resolve to this command (resolveSlashCommand prefers an exact "plugin:name" match).
+    const token = (nameCount.get(command.name) ?? 0) > 1 || fullNames.has(command.name) ? command.fullName : command.name;
     ranked.push({ command, token, rank });
   }
   return ranked

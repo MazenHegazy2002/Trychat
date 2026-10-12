@@ -40,12 +40,47 @@ export function missingConfig(plugin: Plugin): string[] {
 
 const enabled = (plugins: Plugin[]) => plugins.filter((p) => p.enabled);
 
+/**
+ * An installed plugin with the same name as `candidate` but a different id — the same plugin from another
+ * marketplace or repo. Installing both would make their commands, skills, agents and tools ambiguous.
+ */
+export function findNameConflict(plugins: Plugin[], candidate: Pick<Plugin, 'id' | 'name'>): Plugin | undefined {
+  const name = candidate.name.toLowerCase();
+  return plugins.find((p) => p.id !== candidate.id && p.name.toLowerCase() === name);
+}
+
+/** Where a plugin came from, for messages: its marketplace, else "owner/repo" from its id, else its link. */
+export function pluginOrigin(p: Plugin): string {
+  const at = p.id.indexOf('@');
+  return p.marketplace ?? (at > 0 ? p.id.slice(at + 1) : p.source);
+}
+
+/**
+ * Enabled plugins, each with the prefix of its runtime names ("prefix:skill", "/prefix:command", …). Names aren't
+ * unique (the same plugin from two marketplaces, or both synced from another device), so only the one installed
+ * first uses its plain name; the others add where they came from, e.g. "commit-commands@claude-plugins-official".
+ * Every name stays reachable, and which plugin gets the plain name doesn't depend on list order.
+ */
+function enabledWithPrefix(plugins: Plugin[]): [Plugin, string][] {
+  const on = enabled(plugins);
+  const taken = new Set<string>();
+  const prefixes = new Map<string, string>();
+  for (const p of [...on].sort((a, b) => a.installedAt - b.installedAt || (a.id < b.id ? -1 : 1))) {
+    const qualified = `${p.name}@${pluginOrigin(p).replace(/[^\w./-]+/g, '-')}`;
+    let prefix = taken.has(p.name.toLowerCase()) ? qualified : p.name;
+    for (let n = 2; taken.has(prefix.toLowerCase()); n++) prefix = `${qualified}-${n}`;
+    taken.add(prefix.toLowerCase());
+    prefixes.set(p.id, prefix);
+  }
+  return on.map((p) => [p, prefixes.get(p.id) ?? p.name]);
+}
+
 /** Plugin skills as regular skills, named "plugin:skill" like in Claude Code. */
 export function pluginSkills(plugins: Plugin[]): Skill[] {
-  return enabled(plugins).flatMap((p) =>
+  return enabledWithPrefix(plugins).flatMap(([p, prefix]) =>
     p.skills.map((s) => ({
       id: `plugin:${p.id}:skill:${s.name}`,
-      name: `${p.name}:${s.name}`,
+      name: `${prefix}:${s.name}`,
       description: substituteConfig(s.description, p),
       instructions: substituteConfig(s.instructions, p),
       enabled: true,
@@ -57,10 +92,10 @@ export function pluginSkills(plugins: Plugin[]): Skill[] {
 
 /** Remote MCP servers from enabled plugins, ready for the MCP client. */
 export function pluginMcpServers(plugins: Plugin[]): McpServer[] {
-  return enabled(plugins).flatMap((p) =>
+  return enabledWithPrefix(plugins).flatMap(([p, prefix]) =>
     p.mcpServers.map((m) => ({
       id: `plugin:${p.id}:mcp:${m.name}`,
-      name: `${p.name}-${m.name}`,
+      name: `${prefix}-${m.name}`,
       url: substituteConfig(m.url, p, true),
       headers: m.headers
         ? Object.fromEntries(Object.entries(m.headers).map(([k, v]) => [k, substituteConfig(v, p, true)]))
@@ -82,9 +117,9 @@ export interface AgentProfile {
 }
 
 export function pluginAgents(plugins: Plugin[]): AgentProfile[] {
-  return enabled(plugins).flatMap((p) =>
+  return enabledWithPrefix(plugins).flatMap(([p, prefix]) =>
     p.agents.map((a) => ({
-      name: `${p.name}:${a.name}`,
+      name: `${prefix}:${a.name}`,
       description: substituteConfig(a.description, p),
       prompt: substituteConfig(a.prompt, p),
       model: a.model,
@@ -93,7 +128,7 @@ export function pluginAgents(plugins: Plugin[]): AgentProfile[] {
 }
 
 export interface SlashCommand extends PluginCommand {
-  /** "plugin:command" — always accepted. */
+  /** "plugin:command" (or "plugin@marketplace:command" for a second plugin of that name) — unique, always accepted. */
   fullName: string;
   pluginId: string;
   pluginName: string;
@@ -101,12 +136,12 @@ export interface SlashCommand extends PluginCommand {
 
 /** Commands from enabled plugins. `/name` works when unambiguous, `/plugin:name` always. */
 export function slashCommands(plugins: Plugin[]): SlashCommand[] {
-  return enabled(plugins).flatMap((p) =>
+  return enabledWithPrefix(plugins).flatMap(([p, prefix]) =>
     p.commands.map((c) => ({
       ...c,
       description: substituteConfig(c.description, p),
       content: substituteConfig(c.content, p),
-      fullName: `${p.name}:${c.name}`,
+      fullName: `${prefix}:${c.name}`,
       pluginId: p.id,
       pluginName: p.displayName ?? p.name,
     })),
@@ -150,8 +185,9 @@ export function expandCommand(cmd: PluginCommand, args: string): string {
  * Matches "/plugin:name args" exactly, or "/name args" when only one plugin has that command.
  */
 export function resolveSlashCommand(text: string, commands: SlashCommand[]): { prompt: string; command: SlashCommand } | null {
-  // Names may be namespaced more than once, e.g. "/plugin:folder:command".
-  const m = text.trim().match(/^\/([\w.-]+(?::[\w./-]+)*)(?:\s+([\s\S]*))?$/);
+  // Names may be namespaced more than once, e.g. "/plugin:folder:command", and the plugin may carry its
+  // marketplace or repo, e.g. "/plugin@marketplace:command" or "/plugin@owner/repo:command".
+  const m = text.trim().match(/^\/([\w.-]+(?:@[\w./-]+)?(?::[\w./-]+)*)(?:\s+([\s\S]*))?$/);
   if (!m) return null;
   const [, name, args = ''] = m;
   const exact = commands.find((c) => c.fullName === name);

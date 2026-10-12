@@ -18,6 +18,7 @@ import type { CatalogSource, RegistryServer, RemoteField } from '../lib/catalog'
 import { uid } from '../lib/id';
 import { inspectGithubSource, installFromMarketplace } from '../lib/pluginInstaller';
 import type { MarketplaceInfo } from '../lib/pluginInstaller';
+import { findNameConflict, pluginOrigin } from '../lib/plugins';
 import { findSkills, importSkill, parseGithubLink } from '../lib/skills';
 import type { SkillCandidate } from '../lib/skills';
 import { useStore } from '../lib/store';
@@ -67,7 +68,7 @@ export default function StoreScreen() {
 
 function PluginsTab() {
   const theme = useTheme();
-  const { settings, updateSettings, plugins, installPlugin } = useStore();
+  const { settings, updateSettings, plugins, installPlugin, uninstallPlugin } = useStore();
   const [open, setOpen] = useState<CatalogSource | null>(null);
   const [market, setMarket] = useState<MarketplaceInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -189,7 +190,25 @@ function PluginsTab() {
                         onPress={async () => {
                           setInstalling(id);
                           try {
-                            installPlugin(await installFromMarketplace(market, entry, settings.githubToken));
+                            const plugin = await installFromMarketplace(market, entry, settings.githubToken);
+                            // The same plugin from another marketplace or repo: their commands and tools would clash.
+                            const old = findNameConflict(plugins, plugin);
+                            if (!old) return installPlugin(plugin);
+                            Alert.alert(
+                              `Replace ${old.displayName ?? old.name} from ${pluginOrigin(old)}?`,
+                              `Only one plugin named “${plugin.name}” can be installed. The one from ${pluginOrigin(plugin)} replaces it, and its settings are removed.`,
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                  text: 'Replace',
+                                  style: 'destructive',
+                                  onPress: () => {
+                                    uninstallPlugin(old.id);
+                                    installPlugin(plugin);
+                                  },
+                                },
+                              ],
+                            );
                           } catch (e) {
                             Alert.alert(`Couldn’t install ${entry.name}`, errorText(e));
                           } finally {

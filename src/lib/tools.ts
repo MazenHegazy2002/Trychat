@@ -306,10 +306,19 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
     };
   }
 
+  // Servers whose names slug alike (a user's "Linear API" and plugin linear's "api") would get the same tool names,
+  // and the later one would silently replace the earlier one's tools. The first keeps the plain names (user servers
+  // come first); later ones are named like "Linear API 2", so every tool name maps to exactly one server.
+  const namespaces = new Set<string>();
   for (const server of ctx.mcpServers) {
     if (!server.enabled) continue;
+    let named = server;
+    for (let n = 2; namespaces.has(mcpToolName(named, '')) && n <= namespaces.size + 1; n++) {
+      named = { ...server, name: `${server.name} ${n}` };
+    }
+    namespaces.add(mcpToolName(named, ''));
     for (const tool of ctx.mcpTools[server.id] ?? []) {
-      tools[mcpToolName(server, tool.name)] = {
+      tools[mcpToolName(named, tool.name)] = {
         service: 'mcp',
         kind: 'mcp',
         server,
