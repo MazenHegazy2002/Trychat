@@ -8,8 +8,12 @@ const KEYS = {
   settings: 'trychat.settings',
   conversations: 'trychat.conversations',
   memories: 'trychat.memories',
-  apiKey: 'trychat.apiKey',
 };
+
+// Settings fields kept in the device's secure storage instead of AsyncStorage.
+const SECRET_FIELDS = ['apiKey', 'githubToken', 'bridgeToken'] as const;
+type SecretField = (typeof SECRET_FIELDS)[number];
+const secretKey = (field: SecretField) => `trychat.${field}`;
 
 export const DEFAULT_SETTINGS: Settings = {
   baseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://169.58.133.158:20128/v1',
@@ -21,6 +25,12 @@ export const DEFAULT_SETTINGS: Settings = {
   stream: true,
   temperature: 0.7,
   contextMessages: 40,
+  githubToken: '',
+  bridgeUrl: '',
+  bridgeToken: '',
+  confirmCommands: true,
+  confirmWrites: true,
+  confirmReads: false,
 };
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {
@@ -37,25 +47,33 @@ function writeJson(key: string, value: unknown): Promise<void> {
 }
 
 // SecureStore is native-only; fall back to AsyncStorage on web.
-async function readSecret(): Promise<string | null> {
-  if (Platform.OS === 'web') return AsyncStorage.getItem(KEYS.apiKey);
-  return SecureStore.getItemAsync(KEYS.apiKey);
+async function readSecret(field: SecretField): Promise<string | null> {
+  if (Platform.OS === 'web') return AsyncStorage.getItem(secretKey(field));
+  return SecureStore.getItemAsync(secretKey(field));
 }
 
-async function writeSecret(value: string): Promise<void> {
-  if (Platform.OS === 'web') return AsyncStorage.setItem(KEYS.apiKey, value);
-  return SecureStore.setItemAsync(KEYS.apiKey, value);
+async function writeSecret(field: SecretField, value: string): Promise<void> {
+  if (Platform.OS === 'web') return AsyncStorage.setItem(secretKey(field), value);
+  return SecureStore.setItemAsync(secretKey(field), value);
 }
 
 export async function loadSettings(): Promise<Settings> {
   const stored = await readJson<Partial<Settings>>(KEYS.settings, {});
-  const apiKey = await readSecret();
-  return { ...DEFAULT_SETTINGS, ...stored, apiKey: apiKey ?? DEFAULT_SETTINGS.apiKey };
+  const settings: Settings = { ...DEFAULT_SETTINGS, ...stored };
+  for (const field of SECRET_FIELDS) {
+    const value = await readSecret(field);
+    if (value !== null) settings[field] = value;
+  }
+  return settings;
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
-  const { apiKey, ...rest } = settings;
-  await Promise.all([writeJson(KEYS.settings, rest), writeSecret(apiKey)]);
+  const rest: Partial<Settings> = { ...settings };
+  for (const field of SECRET_FIELDS) delete rest[field];
+  await Promise.all([
+    writeJson(KEYS.settings, rest),
+    ...SECRET_FIELDS.map((field) => writeSecret(field, settings[field])),
+  ]);
 }
 
 export const loadConversations = () => readJson<Conversation[]>(KEYS.conversations, []);

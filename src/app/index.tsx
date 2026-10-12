@@ -91,7 +91,7 @@ export default function ConversationsScreen() {
           </Text>
         }
         renderItem={({ item }) => {
-          const last = item.messages[item.messages.length - 1];
+          const last = [...item.messages].reverse().find((m) => !m.toolResult && m.content);
           return (
             <Pressable
               onPress={() => router.push(`/chat/${item.id}`)}

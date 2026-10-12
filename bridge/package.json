@@ -1,0 +1,10 @@
+{
+  "name": "trychat-bridge",
+  "version": "1.0.0",
+  "description": "Lets the TryChat phone app work with files and run commands on your computer.",
+  "type": "module",
+  "bin": { "trychat-bridge": "trychat-bridge.mjs" },
+  "scripts": { "start": "node trychat-bridge.mjs" },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}

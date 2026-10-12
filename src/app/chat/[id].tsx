@@ -17,8 +17,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Markdown } from '../../components/Markdown';
 import { ModelPicker } from '../../components/ModelPicker';
+import { ToolCallCard } from '../../components/ToolCallCard';
 import { TextPrompt } from '../../components/TextPrompt';
 import { useStore } from '../../lib/store';
+import { githubConnected, laptopConnected } from '../../lib/tools';
 import { useTheme } from '../../lib/theme';
 import type { ChatMessage } from '../../lib/types';
 
@@ -27,6 +29,11 @@ const SUGGESTIONS = [
   'Make a snake game I can play',
   'Remember that I prefer short answers',
   'Explain how APIs work, simply',
+];
+
+const TOOL_SUGGESTIONS = [
+  'List my GitHub repositories',
+  'What files are in my project folder on my laptop?',
 ];
 
 export default function ChatScreen() {
@@ -66,6 +73,7 @@ export default function ChatScreen() {
   };
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
+    if (item.toolResult) return null; // shown inside the tool card instead
     if (item.role === 'user') {
       return (
         <Pressable onLongPress={() => onMessageLongPress(item)} style={styles.userRow}>
@@ -81,7 +89,14 @@ export default function ChatScreen() {
     return (
       <Pressable onLongPress={() => onMessageLongPress(item)} style={styles.assistantRow}>
         {item.content ? <Markdown text={item.content} /> : null}
-        {streaming && !item.content && <ActivityIndicator color={theme.muted} style={{ alignSelf: 'flex-start' }} />}
+        {item.toolCall && (
+          <ToolCallCard
+            call={item.toolCall}
+            onApprove={() => store.approveTool(id, item.id)}
+            onDeny={() => store.denyTool(id, item.id)}
+          />
+        )}
+        {streaming && !item.content && !item.toolCall && <ActivityIndicator color={theme.muted} style={{ alignSelf: 'flex-start' }} />}
         {!!item.error && (
           <View style={[styles.error, { borderColor: theme.danger }]}>
             <Text style={{ color: theme.danger }}>{item.error}</Text>
@@ -90,7 +105,7 @@ export default function ChatScreen() {
             </Pressable>
           </View>
         )}
-        {!streaming && !item.error && item.id === lastAssistantId && (
+        {!streaming && !item.error && !item.toolCall && item.id === lastAssistantId && (
           <View style={styles.actions}>
             <Pressable onPress={() => Clipboard.setStringAsync(item.content)} hitSlop={8}>
               <Text style={{ color: theme.muted, fontSize: 13 }}>Copy</Text>
@@ -136,7 +151,11 @@ export default function ChatScreen() {
           <Text style={{ color: theme.muted, textAlign: 'center', marginBottom: 20 }}>
             Chat, ask for apps and games (tap ▶ Preview to run them), or tell me things to remember.
           </Text>
-          {SUGGESTIONS.map((s) => (
+          {[
+            ...(githubConnected(store.settings) ? [TOOL_SUGGESTIONS[0]] : []),
+            ...(laptopConnected(store.settings) ? [TOOL_SUGGESTIONS[1]] : []),
+            ...SUGGESTIONS,
+          ].slice(0, 5).map((s) => (
             <Pressable
               key={s}
               onPress={() => send(s)}

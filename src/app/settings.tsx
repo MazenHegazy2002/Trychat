@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
@@ -5,6 +6,7 @@ import { ModelPicker } from '../components/ModelPicker';
 import { listModels } from '../lib/api';
 import { DEFAULT_SETTINGS } from '../lib/storage';
 import { useStore } from '../lib/store';
+import { githubConnected, laptopConnected } from '../lib/tools';
 import { useTheme } from '../lib/theme';
 import type { Settings } from '../lib/types';
 
@@ -80,6 +82,21 @@ export default function SettingsScreen() {
       {testResult && (
         <Text style={{ color: testResult.ok ? theme.text : theme.danger, marginTop: 8 }}>{testResult.text}</Text>
       )}
+
+      <Text style={[styles.section, { color: theme.text }]}>Connections</Text>
+      <Pressable
+        onPress={() => router.push('/connections')}
+        style={[inputStyle, { flexDirection: 'row', alignItems: 'center', marginTop: 8 }]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.text, fontSize: 15 }}>GitHub & laptop</Text>
+          <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
+            GitHub: {githubConnected(settings) ? 'connected' : 'not connected'} · Laptop:{' '}
+            {laptopConnected(settings) ? 'connected' : 'not connected'}
+          </Text>
+        </View>
+        <Text style={{ color: theme.muted, fontSize: 18 }}>›</Text>
+      </Pressable>
 
       <Text style={[styles.section, { color: theme.text }]}>Model</Text>
       {label('Default model for new chats')}

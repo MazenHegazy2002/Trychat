@@ -1,4 +1,5 @@
 import type { ApiMessage } from './api';
+import { formatToolCall, toolInstructions } from './tools';
 import type { ChatMessage, Memory, Settings } from './types';
 
 const MEMORY_INSTRUCTIONS = `You have a long-term memory that persists across all conversations with this user.
@@ -24,6 +25,8 @@ export function buildSystemPrompt(settings: Settings, memories: Memory[]): strin
         : 'You do not remember anything about the user yet.',
     );
   }
+  const tools = toolInstructions(settings);
+  if (tools) parts.push(tools);
   parts.push(`Current date: ${new Date().toDateString()}.`);
   return parts.filter(Boolean).join('\n\n');
 }
@@ -34,11 +37,14 @@ export function buildApiMessages(
   history: ChatMessage[],
 ): ApiMessage[] {
   const recent = history
-    .filter((m) => !m.error && m.content.trim())
+    .filter((m) => !m.error && (m.content.trim() || m.toolCall))
     .slice(-Math.max(1, settings.contextMessages));
   return [
     { role: 'system', content: buildSystemPrompt(settings, memories) },
-    ...recent.map((m) => ({ role: m.role, content: m.content })),
+    ...recent.map((m) => ({
+      role: m.role,
+      content: m.toolCall ? `${m.content}\n\n${formatToolCall(m.toolCall)}`.trim() : m.content,
+    })),
   ];
 }
 

@@ -5,6 +5,7 @@ import { chat } from './api';
 import { uid } from './id';
 import { buildApiMessages, extractMemoryOps, stripMemoryTags } from './prompt';
 import * as storage from './storage';
+import { formatToolResult, needsApproval, parseToolCall, runTool, stripToolTags } from './tools';
 import type { ChatMessage, Conversation, Memory, Settings } from './types';
 
 interface Store {
@@ -23,6 +24,8 @@ interface Store {
   send: (conversationId: string, text: string) => Promise<void>;
   regenerate: (conversationId: string) => Promise<void>;
   stop: (conversationId: string) => void;
+  approveTool: (conversationId: string, messageId: string) => Promise<void>;
+  denyTool: (conversationId: string, messageId: string) => Promise<void>;
   addMemory: (text: string) => void;
   updateMemory: (id: string, text: string) => void;
   deleteMemory: (id: string) => void;
@@ -35,6 +38,21 @@ export function useStore(): Store {
   const store = useContext(StoreContext);
   if (!store) throw new Error('useStore must be used inside <StoreProvider>');
   return store;
+}
+
+/** After this many tool steps in a row, ask the user before continuing even for auto-approved tools. */
+const MAX_AUTO_TOOL_STEPS = 12;
+
+const display = (text: string) => stripToolTags(stripMemoryTags(text));
+
+function toolStepsSinceUser(history: ChatMessage[]): number {
+  let n = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role === 'user' && !m.toolResult) break;
+    if (m.toolResult) n++;
+  }
+  return n;
 }
 
 function titleFrom(text: string): string {
@@ -141,6 +159,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const endBusy = useCallback((conversationId: string) => {
+    delete controllers.current[conversationId];
+    setBusy((b) => {
+      const { [conversationId]: _, ...rest } = b;
+      return rest;
+    });
+  }, []);
+
   /** Runs a completion for the conversation's current history and fills in a new assistant message. */
   const respond = useCallback(
     async (conversationId: string, history: ChatMessage[]) => {
@@ -167,9 +193,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      setBusy((b) => ({ ...b, [conversationId]: true }));
       const controller = new AbortController();
       controllers.current[conversationId] = controller;
-      setBusy((b) => ({ ...b, [conversationId]: true }));
       let raw = '';
       try {
         raw = await chat({
@@ -179,27 +205,100 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           signal: controller.signal,
           onText: (text) => {
             raw = text;
-            setAssistant({ content: stripMemoryTags(text) });
+            setAssistant({ content: display(text) });
           },
         });
-        setAssistant({ content: stripMemoryTags(raw) });
-        if (s.memoryEnabled) applyMemoryOps(raw);
       } catch (e) {
-        if (controller.signal.aborted) {
-          setAssistant({ content: stripMemoryTags(raw) });
-        } else {
-          setAssistant({ content: stripMemoryTags(raw), error: e instanceof Error ? e.message : String(e) });
+        if (!controller.signal.aborted) {
+          setAssistant({ content: display(raw), error: e instanceof Error ? e.message : String(e) });
+          endBusy(conversationId);
+          return;
         }
-      } finally {
-        delete controllers.current[conversationId];
-        setBusy((b) => {
-          const { [conversationId]: _, ...rest } = b;
-          return rest;
-        });
       }
+      delete controllers.current[conversationId];
+      if (s.memoryEnabled) applyMemoryOps(raw);
+
+      const { call, before } = controller.signal.aborted ? { call: null, before: raw } : parseToolCall(raw);
+      if (!call) {
+        setAssistant({ content: display(raw) });
+        endBusy(conversationId);
+        return;
+      }
+
+      if (call.status === 'pending' && toolStepsSinceUser(history) < MAX_AUTO_TOOL_STEPS && !needsApproval(call, s)) {
+        call.status = 'running';
+      }
+      const finished: ChatMessage = { ...assistant, content: display(before), toolCall: call };
+      setAssistant({ content: finished.content, toolCall: call });
+      if (call.status === 'pending') {
+        endBusy(conversationId); // wait for the user to approve or deny
+        return;
+      }
+      await continueAfterTool(conversationId, [...history, finished], finished.id);
     },
     [patchConversation, applyMemoryOps],
   );
+
+  /** Runs (or skips, if denied/invalid) the tool on a message, then sends the result back to the model. */
+  const continueAfterTool = async (conversationId: string, messages: ChatMessage[], messageId: string) => {
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg?.toolCall) return;
+    let call = msg.toolCall;
+    const setCall = (c: typeof call) =>
+      patchConversation(conversationId, (conv) => ({
+        ...conv,
+        messages: conv.messages.map((m) => (m.id === messageId ? { ...m, toolCall: c } : m)),
+      }));
+
+    if (call.status === 'pending' || call.status === 'running') {
+      call = { ...call, status: 'running' };
+      setCall(call);
+      setBusy((b) => ({ ...b, [conversationId]: true }));
+      // Stop can't cancel a running tool, but it does stop the model from continuing afterwards.
+      const controller = new AbortController();
+      controllers.current[conversationId] = controller;
+      try {
+        call = { ...call, status: 'done', result: await runTool(call, settingsRef.current) };
+      } catch (e) {
+        call = { ...call, status: 'error', result: e instanceof Error ? e.message : String(e) };
+      }
+      setCall(call);
+      if (controller.signal.aborted) {
+        endBusy(conversationId);
+        return;
+      }
+    }
+
+    const resultMsg: ChatMessage = {
+      id: uid(),
+      role: 'user',
+      content: formatToolResult(call),
+      toolResult: true,
+      createdAt: Date.now(),
+    };
+    const next = messages.map((m) => (m.id === messageId ? { ...m, toolCall: call } : m));
+    await respondRef.current(conversationId, [...next, resultMsg]);
+  };
+
+  const respondRef = useRef(respond);
+  respondRef.current = respond;
+
+  const approveTool = useCallback(async (conversationId: string, messageId: string) => {
+    const conv = convRef.current.find((c) => c.id === conversationId);
+    if (conv) await continueAfterTool(conversationId, conv.messages, messageId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const denyTool = useCallback(async (conversationId: string, messageId: string) => {
+    const conv = convRef.current.find((c) => c.id === conversationId);
+    if (!conv) return;
+    const messages = conv.messages.map((m) =>
+      m.id === messageId && m.toolCall ? { ...m, toolCall: { ...m.toolCall, status: 'denied' as const } } : m,
+    );
+    patchConversation(conversationId, (c) => ({ ...c, messages }));
+    await continueAfterTool(conversationId, messages, messageId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const send = useCallback(
     async (conversationId: string, text: string) => {
@@ -259,6 +358,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         send,
         regenerate,
         stop,
+        approveTool,
+        denyTool,
         addMemory,
         updateMemory,
         deleteMemory,

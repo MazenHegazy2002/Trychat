@@ -30,6 +30,7 @@ function Navigator() {
       <Stack.Screen name="chat/[id]" options={{ title: '' }} />
       <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       <Stack.Screen name="memory" options={{ title: 'Memory' }} />
+      <Stack.Screen name="connections" options={{ title: 'Connections' }} />
       <Stack.Screen name="preview" options={{ title: 'Preview', presentation: 'modal' }} />
     </Stack>
   );
