@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,12 +18,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AttachSheet, MessageAttachments, PendingAttachments } from '../../components/Attachments';
 import type { AttachSource } from '../../components/Attachments';
 import { Icon } from '../../components/ui';
+import { MONO, SlashMenu, isTypingSlashCommand } from '../../components/SlashMenu';
 import { pickFiles, pickImages, takePhoto } from '../../lib/attachments';
 import { Markdown } from '../../components/Markdown';
 import { ModelPicker } from '../../components/ModelPicker';
 import { MoveToProjectSheet } from '../../components/MoveToProjectSheet';
 import { ToolCallCard } from '../../components/ToolCallCard';
 import { TextPrompt } from '../../components/TextPrompt';
+import { resolveSlashCommand } from '../../lib/plugins';
 import { useStore } from '../../lib/store';
 import { githubConnected, laptopConnected } from '../../lib/tools';
 import { useTheme } from '../../lib/theme';
@@ -61,6 +63,7 @@ export default function ChatScreen() {
   const [pending, setPending] = useState<Attachment[]>([]);
   const [attaching, setAttaching] = useState(false);
   const keyboardVisible = useKeyboardState((k) => k.isVisible);
+  const inputRef = useRef<TextInput>(null);
 
   if (!conv) {
     return (
@@ -75,13 +78,28 @@ export default function ChatScreen() {
   const lastAssistantId = [...conv.messages].reverse().find((m) => m.role === 'assistant')?.id;
 
   const canSend = !!input.trim() || pending.length > 0;
+  const slashOpen = isTypingSlashCommand(input);
 
   const send = (text = input) => {
     if ((!text.trim() && !pending.length) || busy || attaching) return;
     setInput('');
     const attachments = pending;
     setPending([]);
-    store.send(id, text, attachments);
+    // "/command args" from an enabled plugin expands to its prompt; the bubble keeps what was typed.
+    // Unknown "/something" is just text.
+    const match = resolveSlashCommand(text, store.commands);
+    if (match?.prompt) store.send(id, match.prompt, attachments, text.trim());
+    else store.send(id, text, attachments);
+  };
+
+  const pickCommand = (token: string) => {
+    setInput(`/${token} `);
+    inputRef.current?.focus();
+  };
+
+  const startCommand = () => {
+    setInput('/');
+    inputRef.current?.focus();
   };
 
   const attach = async (source: AttachSource) => {
@@ -97,9 +115,10 @@ export default function ChatScreen() {
   };
 
   const onMessageLongPress = (m: ChatMessage) => {
+    const shown = m.displayText ?? m.content;
     Alert.alert('Message', undefined, [
-      { text: 'Copy', onPress: () => Clipboard.setStringAsync(m.content) },
-      ...(m.role === 'user' ? [{ text: 'Edit & resend', onPress: () => setInput(m.content) }] : []),
+      { text: 'Copy', onPress: () => Clipboard.setStringAsync(shown) },
+      ...(m.role === 'user' ? [{ text: 'Edit & resend', onPress: () => setInput(shown) }] : []),
       { text: 'Cancel', style: 'cancel' as const },
     ]);
   };
@@ -110,7 +129,11 @@ export default function ChatScreen() {
       return (
         <Pressable onLongPress={() => onMessageLongPress(item)} style={styles.userRow}>
           {!!item.attachments?.length && <MessageAttachments items={item.attachments} />}
-          {!!item.content && (
+          {item.displayText ? (
+            <View style={[styles.userBubble, { backgroundColor: theme.userBubble }]}>
+              <CommandText text={item.displayText} />
+            </View>
+          ) : !!item.content && (
             <View style={[styles.userBubble, { backgroundColor: theme.userBubble }]}>
               <Text selectable style={{ color: theme.onUserBubble, fontSize: 16, lineHeight: 22 }}>
                 {item.content}
@@ -182,53 +205,74 @@ export default function ChatScreen() {
         }}
       />
 
-      {conv.messages.length === 0 ? (
-        <ScrollView contentContainerStyle={[styles.emptyState, { padding: 24 }]} keyboardShouldPersistTaps="handled">
-          <View style={[styles.mark, { backgroundColor: theme.accent }]}>
-            <Text style={{ color: '#FFFFFF', fontSize: 20, fontWeight: '700' }}>T</Text>
+      <View style={styles.flex}>
+        {conv.messages.length === 0 ? (
+          <ScrollView contentContainerStyle={[styles.emptyState, { padding: 24 }]} keyboardShouldPersistTaps="handled">
+            <View style={[styles.mark, { backgroundColor: theme.accent }]}>
+              <Text style={{ color: '#FFFFFF', fontSize: 20, fontWeight: '700' }}>T</Text>
+            </View>
+            <Text style={{ color: theme.text, fontSize: 30, fontFamily: theme.serif, marginBottom: 8, textAlign: 'center' }}>
+              {greeting()}
+              {store.account ? `, ${store.account.user.name}` : ''}
+            </Text>
+            <Text style={{ color: theme.muted, textAlign: 'center', marginBottom: 20 }}>
+              Chat, ask for apps and games (tap ▶ Preview to run them), or tell me things to remember.
+            </Text>
+            {[
+              ...(githubConnected(store.settings) ? [TOOL_SUGGESTIONS[0]] : []),
+              ...(laptopConnected(store.settings) ? [TOOL_SUGGESTIONS[1]] : []),
+              ...SUGGESTIONS,
+            ].slice(0, 5).map((s) => (
+              <Pressable
+                key={s}
+                onPress={() => send(s)}
+                style={[styles.suggestion, { backgroundColor: theme.surface, borderColor: theme.border }]}
+              >
+                <Text style={{ color: theme.text }}>{s}</Text>
+              </Pressable>
+            ))}
+            {store.commands.length > 0 && (
+              <Pressable onPress={startCommand} style={styles.hint} accessibilityRole="button" accessibilityLabel="Type slash to use plugin commands">
+                <Text style={{ color: theme.muted, fontSize: 13 }}>
+                  Type <Text style={{ fontFamily: MONO, color: theme.text }}>/</Text> to use plugin commands
+                </Text>
+              </Pressable>
+            )}
+            {!model && (
+              <Pressable onPress={() => router.push('/settings')} style={{ marginTop: 16 }}>
+                <Text style={{ color: theme.danger }}>No model selected — open Settings</Text>
+              </Pressable>
+            )}
+          </ScrollView>
+        ) : (
+          <FlatList
+            inverted
+            data={[...conv.messages].reverse()}
+            keyExtractor={(m) => m.id}
+            renderItem={renderMessage}
+            contentContainerStyle={{ paddingVertical: 12 }}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+          />
+        )}
+        {slashOpen && (
+          // Floats over the bottom of the conversation, just above the composer, and rises with the keyboard.
+          <View style={styles.slashLayer}>
+            <SlashMenu
+              query={input.slice(1)}
+              commands={store.commands}
+              onSelect={pickCommand}
+              onOpenPlugins={() => router.push('/plugins')}
+            />
           </View>
-          <Text style={{ color: theme.text, fontSize: 30, fontFamily: theme.serif, marginBottom: 8, textAlign: 'center' }}>
-            {greeting()}
-            {store.account ? `, ${store.account.user.name}` : ''}
-          </Text>
-          <Text style={{ color: theme.muted, textAlign: 'center', marginBottom: 20 }}>
-            Chat, ask for apps and games (tap ▶ Preview to run them), or tell me things to remember.
-          </Text>
-          {[
-            ...(githubConnected(store.settings) ? [TOOL_SUGGESTIONS[0]] : []),
-            ...(laptopConnected(store.settings) ? [TOOL_SUGGESTIONS[1]] : []),
-            ...SUGGESTIONS,
-          ].slice(0, 5).map((s) => (
-            <Pressable
-              key={s}
-              onPress={() => send(s)}
-              style={[styles.suggestion, { backgroundColor: theme.surface, borderColor: theme.border }]}
-            >
-              <Text style={{ color: theme.text }}>{s}</Text>
-            </Pressable>
-          ))}
-          {!model && (
-            <Pressable onPress={() => router.push('/settings')} style={{ marginTop: 16 }}>
-              <Text style={{ color: theme.danger }}>No model selected — open Settings</Text>
-            </Pressable>
-          )}
-        </ScrollView>
-      ) : (
-        <FlatList
-          inverted
-          data={[...conv.messages].reverse()}
-          keyExtractor={(m) => m.id}
-          renderItem={renderMessage}
-          contentContainerStyle={{ paddingVertical: 12 }}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-        />
-      )}
+        )}
+      </View>
 
       <View style={[styles.composerWrap, { paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 10) }]}>
         <View style={[styles.composer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <PendingAttachments items={pending} onRemove={(aid) => setPending((p) => p.filter((x) => x.id !== aid))} />
           <TextInput
+            ref={inputRef}
             value={input}
             onChangeText={setInput}
             placeholder={conv.messages.length ? 'Reply to TryChat' : 'How can I help you today?'}
@@ -295,7 +339,32 @@ export default function ChatScreen() {
   );
 }
 
+/** A user bubble for a slash command: the command token in mono under a tiny "command" label. */
+function CommandText({ text }: { text: string }) {
+  const theme = useTheme();
+  const m = text.match(/^(\/\S+)([\s\S]*)$/);
+  return (
+    <View>
+      <View style={styles.commandLabel}>
+        <Icon name="terminal" size={11} color={theme.muted} />
+        <Text style={{ color: theme.muted, fontSize: 11 }}>command</Text>
+      </View>
+      <Text selectable style={{ color: theme.onUserBubble, fontSize: 16, lineHeight: 22 }}>
+        {m ? (
+          <>
+            <Text style={{ fontFamily: MONO, fontSize: 15 }}>{m[1]}</Text>
+            {m[2]}
+          </>
+        ) : (
+          text
+        )}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyState: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
   mark: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
@@ -305,6 +374,17 @@ const styles = StyleSheet.create({
   error: { borderWidth: 1, borderRadius: 10, padding: 10, marginTop: 6 },
   actions: { flexDirection: 'row', gap: 18, marginTop: 8 },
   suggestion: { width: '100%', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 8 },
+  hint: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8, marginTop: 4 },
+  slashLayer: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    top: 8,
+    bottom: 6,
+    justifyContent: 'flex-end',
+    pointerEvents: 'box-none',
+  },
+  commandLabel: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
   composerWrap: { paddingHorizontal: 12, paddingTop: 6 },
   composer: { borderWidth: 1, borderRadius: 24, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 8 },
   input: { maxHeight: 160, minHeight: 40, fontSize: 16, paddingHorizontal: 4, paddingVertical: 8 },

@@ -1,18 +1,22 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
-import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, TextAction } from '../components/ui';
+import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel, TextAction } from '../components/ui';
 import { uid } from '../lib/id';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { McpServer } from '../lib/types';
 
+/** Host of a URL without credentials or query (plugin URLs can carry secrets). */
+const hostOf = (url: string) => url.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?([^/?#]+)/i)?.[1] ?? url;
+
 const blank = (): McpServer => ({ id: uid(), name: '', url: '', token: '', enabled: true, confirm: true, updatedAt: Date.now() });
 
 export default function McpScreen() {
   const theme = useTheme();
-  const { mcpServers, mcpTools, mcpErrors, saveMcpServer, deleteMcpServer, refreshMcpTools } = useStore();
+  const { mcpServers, pluginServers, plugins, mcpTools, mcpErrors, saveMcpServer, deleteMcpServer, refreshMcpTools } = useStore();
   const [draft, setDraft] = useState<McpServer | null>(null);
   const [refreshing, setRefreshing] = useState<string | null>(null);
 
@@ -153,6 +157,74 @@ export default function McpScreen() {
       ) : (
         <PillButton title="Add MCP server" icon="plus" onPress={() => setDraft(blank())} style={{ marginTop: 20 }} />
       )}
+
+      {pluginServers.length > 0 && (
+        <>
+          <SectionLabel>From plugins</SectionLabel>
+          <Card>
+            {pluginServers.map((server, i) => {
+              const tools = mcpTools[server.id];
+              const error = mcpErrors[server.id];
+              const plugin = plugins.find((p) => p.id === server.pluginId);
+              return (
+                <View key={server.id}>
+                  {i > 0 && <Divider />}
+                  <View style={styles.pluginRow}>
+                    <IconTile name="package" />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }} numberOfLines={1}>
+                        {server.name}
+                      </Text>
+                      <Text style={{ color: theme.faint, fontSize: 12, fontFamily: 'monospace', marginTop: 2 }} numberOfLines={1}>
+                        {hostOf(server.url)}
+                        {plugin ? ` · ${plugin.displayName ?? plugin.name}` : ''}
+                      </Text>
+                      <View style={[styles.status, { paddingBottom: 0, marginTop: 4 }]}>
+                        {error ? (
+                          <>
+                            <Icon name="alert-circle" size={14} color={theme.danger} />
+                            <Text style={{ color: theme.danger, fontSize: 12, flex: 1 }} numberOfLines={3}>
+                              {error}
+                            </Text>
+                          </>
+                        ) : tools ? (
+                          <>
+                            <Icon name="check-circle" size={14} color={theme.accent} />
+                            <Text style={{ color: theme.muted, fontSize: 12 }}>
+                              {tools.length} tool{tools.length === 1 ? '' : 's'} · asks before each call
+                            </Text>
+                          </>
+                        ) : (
+                          <>
+                            <ActivityIndicator size="small" color={theme.muted} />
+                            <Text style={{ color: theme.muted, fontSize: 12 }}>Connecting…</Text>
+                          </>
+                        )}
+                      </View>
+                    </View>
+                    {!!error &&
+                      (refreshing === server.id ? (
+                        <ActivityIndicator color={theme.primary} style={{ minWidth: 44, minHeight: 44 }} />
+                      ) : (
+                        <TextAction title="Retry" onPress={() => refresh(server.id)} />
+                      ))}
+                  </View>
+                </View>
+              );
+            })}
+          </Card>
+          <Pressable
+            onPress={() => router.push('/plugins')}
+            style={styles.manageRow}
+            accessibilityRole="link"
+            accessibilityLabel="Manage these in Plugins"
+          >
+            <Text style={{ color: theme.muted, fontSize: 13 }}>Manage these in </Text>
+            <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '600' }}>Plugins</Text>
+            <Icon name="chevron-right" size={14} color={theme.primary} />
+          </Pressable>
+        </>
+      )}
     </KeyboardAwareScrollView>
   );
 }
@@ -163,6 +235,8 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingBottom: 12 },
   askRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, minHeight: 52 },
   actions: { flexDirection: 'row', gap: 24, paddingHorizontal: 16 },
+  pluginRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 64 },
+  manageRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44 },
   label: { fontSize: 13, marginTop: 14, marginBottom: 6 },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 48 },
 });

@@ -13,7 +13,7 @@ import type { Settings } from '../lib/types';
 
 export default function SettingsScreen() {
   const theme = useTheme();
-  const { settings, updateSettings, clearConversations, account, skills, mcpServers, mcpTools } = useStore();
+  const { settings, updateSettings, clearConversations, account, skills, mcpServers, mcpTools, plugins } = useStore();
   const [draft, setDraft] = useState<Settings>(settings);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -128,6 +128,13 @@ export default function SettingsScreen() {
             mcpServers.length
               ? `${mcpServers.length} server${mcpServers.length === 1 ? '' : 's'} · ${Object.values(mcpTools).flat().length} tools`
               : 'Add tools from MCP servers',
+          ],
+          [
+            '/plugins',
+            'Plugins',
+            plugins.length
+              ? `${plugins.length} installed · ${plugins.filter((p) => p.enabled).length} enabled`
+              : 'Add skills, commands, agents and tools in one install',
           ],
         ] as const
       ).map(([href, title, sub]) => (
