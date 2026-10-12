@@ -18,6 +18,8 @@ const light = {
   codeBg: '#1F1E1D',
   codeText: '#E8E6DC',
   danger: '#B3261E',
+  oat: '#E3DACC',
+  faint: '#73726C',
   serif,
 };
 
@@ -36,6 +38,8 @@ const dark: typeof light = {
   codeBg: '#1F1E1D',
   codeText: '#E8E6DC',
   danger: '#F2B8B5',
+  oat: '#3D3D3A',
+  faint: '#9C9A92',
   serif,
 };
 
