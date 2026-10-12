@@ -36,6 +36,11 @@ const TOOL_SUGGESTIONS = [
   'What files are in my project folder on my laptop?',
 ];
 
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
+
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
@@ -147,7 +152,13 @@ export default function ChatScreen() {
 
       {conv.messages.length === 0 ? (
         <View style={[styles.center, { padding: 24 }]}>
-          <Text style={{ color: theme.text, fontSize: 22, fontWeight: '700', marginBottom: 6 }}>What should we build?</Text>
+          <View style={[styles.mark, { backgroundColor: theme.accent }]}>
+            <Text style={{ color: '#FFFFFF', fontSize: 20, fontWeight: '700' }}>T</Text>
+          </View>
+          <Text style={{ color: theme.text, fontSize: 30, fontFamily: theme.serif, marginBottom: 8, textAlign: 'center' }}>
+            {greeting()}
+            {store.account ? `, ${store.account.user.name}` : ''}
+          </Text>
           <Text style={{ color: theme.muted, textAlign: 'center', marginBottom: 20 }}>
             Chat, ask for apps and games (tap ▶ Preview to run them), or tell me things to remember.
           </Text>
@@ -194,17 +205,17 @@ export default function ChatScreen() {
           placeholder="Message"
           placeholderTextColor={theme.muted}
           multiline
-          style={[styles.input, { backgroundColor: theme.surface, color: theme.text }]}
+          style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderWidth: 1, borderColor: theme.border }]}
         />
         {busy ? (
-          <Pressable onPress={() => store.stop(id)} style={[styles.sendBtn, { backgroundColor: theme.danger }]}>
-            <Text style={styles.sendIcon}>■</Text>
+          <Pressable onPress={() => store.stop(id)} style={[styles.sendBtn, { backgroundColor: theme.text }]}>
+            <Text style={[styles.sendIcon, { color: theme.bg }]}>■</Text>
           </Pressable>
         ) : (
           <Pressable
             onPress={() => send()}
             disabled={!input.trim()}
-            style={[styles.sendBtn, { backgroundColor: input.trim() ? theme.primary : theme.border }]}
+            style={[styles.sendBtn, { backgroundColor: input.trim() ? theme.accent : theme.surface2 }]}
           >
             <Text style={styles.sendIcon}>↑</Text>
           </Pressable>
@@ -230,6 +241,7 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  mark: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   userRow: { alignItems: 'flex-end', paddingHorizontal: 12, marginVertical: 6 },
   userBubble: { maxWidth: '85%', borderRadius: 18, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 9 },
   assistantRow: { paddingHorizontal: 16, marginVertical: 8 },

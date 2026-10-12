@@ -1,33 +1,42 @@
-import { useColorScheme } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
+
+// Claude-style palette: warm ivory ground, Slate text, Clay accent, warm grays.
+const serif = Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia, serif' });
 
 const light = {
-  bg: '#FFFFFF',
-  surface: '#F3F4F6',
-  border: '#E5E7EB',
-  text: '#111827',
-  muted: '#6B7280',
-  primary: '#4F46E5',
+  bg: '#FAF9F5',
+  surface: '#FFFFFF',
+  surface2: '#F0EEE6',
+  border: 'rgba(31,30,29,0.15)',
+  text: '#141413',
+  muted: '#5E5D59',
+  primary: '#B5532F', // Clay, darkened for text contrast
+  accent: '#D97757', // Clay for icon fills
   onPrimary: '#FFFFFF',
-  userBubble: '#4F46E5',
-  onUserBubble: '#FFFFFF',
-  codeBg: '#0F172A',
-  codeText: '#E2E8F0',
-  danger: '#DC2626',
+  userBubble: '#F0EEE6',
+  onUserBubble: '#141413',
+  codeBg: '#1F1E1D',
+  codeText: '#E8E6DC',
+  danger: '#B3261E',
+  serif,
 };
 
 const dark: typeof light = {
-  bg: '#0B0F17',
-  surface: '#161B26',
-  border: '#262D3B',
-  text: '#F3F4F6',
-  muted: '#9CA3AF',
-  primary: '#818CF8',
-  onPrimary: '#0B0F17',
-  userBubble: '#4F46E5',
-  onUserBubble: '#FFFFFF',
-  codeBg: '#05080F',
-  codeText: '#E2E8F0',
-  danger: '#F87171',
+  bg: '#262624',
+  surface: '#30302E',
+  surface2: '#1F1E1D',
+  border: 'rgba(250,249,245,0.12)',
+  text: '#F5F4ED',
+  muted: '#C2C0B6',
+  primary: '#E8957A',
+  accent: '#D97757',
+  onPrimary: '#141413',
+  userBubble: '#141413',
+  onUserBubble: '#F5F4ED',
+  codeBg: '#1F1E1D',
+  codeText: '#E8E6DC',
+  danger: '#F2B8B5',
+  serif,
 };
 
 export type Theme = typeof light;

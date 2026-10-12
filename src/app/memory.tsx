@@ -58,9 +58,9 @@ export default function MemoryScreen() {
       />
       <Pressable
         onPress={() => setEditing('new')}
-        style={[styles.fab, { backgroundColor: theme.primary, bottom: insets.bottom + 20 }]}
+        style={[styles.fab, { backgroundColor: theme.text, bottom: insets.bottom + 20 }]}
       >
-        <Text style={{ color: theme.onPrimary, fontWeight: '700', fontSize: 16 }}>＋ Add memory</Text>
+        <Text style={{ color: theme.bg, fontWeight: '700', fontSize: 16 }}>＋ Add memory</Text>
       </Pressable>
       <TextPrompt
         visible={editing !== null}

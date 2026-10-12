@@ -144,7 +144,7 @@ function CodeBlock({ lang, code, closed, theme }: { lang: string; code: string; 
         <View style={{ flexDirection: 'row', gap: 14 }}>
           {closed && isPreviewable(lang) && (
             <Pressable onPress={preview} hitSlop={8}>
-              <Text style={[styles.codeAction, { color: '#A5B4FC' }]}>▶ {previewVerb(lang)}</Text>
+              <Text style={[styles.codeAction, { color: '#E3A07F' }]}>▶ {previewVerb(lang)}</Text>
             </Pressable>
           )}
           <Pressable onPress={copy} hitSlop={8}>
@@ -176,7 +176,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
                 key={i}
                 text={b.text}
                 theme={theme}
-                style={{ fontWeight: '700', fontSize: [24, 21, 19, 17, 16, 16][b.level - 1], lineHeight: 30 }}
+                style={{ fontFamily: theme.serif, fontWeight: '500', fontSize: [24, 21, 19, 17, 16, 16][b.level - 1], lineHeight: 30 }}
               />
             );
           case 'list':

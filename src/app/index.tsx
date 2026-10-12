@@ -125,9 +125,9 @@ export default function ConversationsScreen() {
 
       <Pressable
         onPress={newChat}
-        style={[styles.fab, { backgroundColor: theme.primary, bottom: insets.bottom + 20 }]}
+        style={[styles.fab, { backgroundColor: theme.text, bottom: insets.bottom + 20 }]}
       >
-        <Text style={{ color: theme.onPrimary, fontSize: 16, fontWeight: '700' }}>＋ New chat</Text>
+        <Text style={{ color: theme.bg, fontSize: 16, fontWeight: '700' }}>＋ New chat</Text>
       </Pressable>
     </View>
   );
