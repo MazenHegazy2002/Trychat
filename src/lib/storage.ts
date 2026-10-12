@@ -40,6 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
   repos: [],
   subAgents: true,
   codeExecution: true,
+  marketplaces: [],
 };
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {

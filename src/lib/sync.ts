@@ -42,6 +42,7 @@ export const SYNCED_PREFS = [
   'repos',
   'subAgents',
   'codeExecution',
+  'marketplaces',
 ] as const satisfies readonly (keyof Settings)[];
 
 const key = (i: { collection: string; id: string }) => `${i.collection}/${i.id}`;
@@ -56,7 +57,8 @@ export function localItems(state: SyncState): SyncItem[] {
     ...state.projects.map((p) => ({ collection: 'projects' as const, id: p.id, updatedAt: p.updatedAt, data: p })),
     // Plugin secrets (sensitive settings) stay on the device.
     ...state.plugins.map(({ secrets: _secrets, ...p }) => ({ collection: 'plugins' as const, id: p.id, updatedAt: p.updatedAt, data: p })),
-    ...state.mcpServers.map(({ token: _secret, ...s }) => ({
+    // Tokens and headers (API keys) stay on the device.
+    ...state.mcpServers.map(({ token: _secret, headers: _headers, ...s }) => ({
       collection: 'mcpServers' as const,
       id: s.id,
       updatedAt: s.updatedAt,

@@ -290,7 +290,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         sync.mergeList(list, items, 'plugins', (p) => p.updatedAt, (data, local) => ({ ...data, secrets: local?.secrets })),
       );
       setMcpServers((list) =>
-        sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, (data, local) => ({ ...data, token: local?.token })),
+        sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, (data, local) => ({ ...data, token: local?.token, headers: local?.headers })),
       );
       const merged = sync.mergePrefs(settingsRef.current, items);
       if (merged !== settingsRef.current) {

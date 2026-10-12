@@ -96,6 +96,8 @@ export interface McpServer {
   updatedAt: number;
   /** Set for servers that come from a plugin (read-only in the MCP screen). */
   pluginId?: string;
+  /** Registry id (e.g. "com.notion/mcp") when added from the Store. */
+  registryName?: string;
 }
 
 /**
@@ -224,6 +226,8 @@ export interface Settings {
   subAgents: boolean;
   /** Let the model run JavaScript / Python on the phone. */
   codeExecution: boolean;
+  /** Plugin marketplaces the user added to the Store ("owner/repo"). */
+  marketplaces: string[];
   /** When synced preferences last changed (drives last-write-wins across devices). */
   prefsUpdatedAt?: number;
 }
