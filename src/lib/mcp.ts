@@ -38,6 +38,7 @@ async function post(server: McpServer, payload: object): Promise<{ status: numbe
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
       'MCP-Protocol-Version': PROTOCOL_VERSION,
+      ...(server.headers ?? {}),
       ...(server.token ? { Authorization: `Bearer ${server.token}` } : {}),
       ...(session ? { 'Mcp-Session-Id': session } : {}),
     },

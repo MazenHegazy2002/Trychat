@@ -28,7 +28,7 @@ const PORT = Number(args.port ?? process.env.PORT ?? 8787);
 const DATA_DIR = path.resolve(args.data ?? process.env.TRYCHAT_DATA ?? './trychat-data');
 const ALLOW_SIGNUP = (args.signup ?? process.env.TRYCHAT_ALLOW_SIGNUP ?? 'true') !== 'false';
 const MAX_BODY = 20 * 1024 * 1024;
-const COLLECTIONS = new Set(['memories', 'conversations', 'skills', 'mcpServers', 'projects', 'prefs']);
+const COLLECTIONS = new Set(['memories', 'conversations', 'skills', 'mcpServers', 'projects', 'plugins', 'prefs']);
 
 // ---------- Tiny JSON file store (one file per account + an index) ----------
 

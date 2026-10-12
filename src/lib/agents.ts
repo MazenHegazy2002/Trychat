@@ -14,9 +14,14 @@ const MAX_STEPS = 8;
 export interface SubAgentTask {
   task: string;
   model?: string;
+  /** Name of a plugin agent ("plugin:agent") whose system prompt to use. */
+  agent?: string;
 }
 
-async function runOne(ctx: ToolContext, defaultModel: string, { task, model }: SubAgentTask): Promise<string> {
+async function runOne(ctx: ToolContext, defaultModel: string, { task, model, agent }: SubAgentTask): Promise<string> {
+  // A plugin agent's `model` names Claude models (sonnet/opus/inherit), so it's ignored here:
+  // only a model id the assistant passes explicitly overrides the chat's model.
+  const profile = agent ? ctx.agentProfiles?.find((p) => p.name === agent) : undefined;
   const safe = (name: string) => name !== 'agents.run' && !needsApproval({ name, args: {}, status: 'pending' }, ctx);
   const subCtx: ToolContext = { ...ctx, runSubAgents: undefined };
   const tools = toolInstructions(subCtx, (name) => safe(name));
@@ -24,6 +29,7 @@ async function runOne(ctx: ToolContext, defaultModel: string, { task, model }: S
     {
       role: 'system',
       content: [
+        profile?.prompt,
         'You are a focused sub-agent working for another AI assistant. Complete the task and reply with a clear, self-contained answer — it is passed back verbatim. Be concise; no greetings.',
         tools,
         `Current date: ${new Date().toDateString()}.`,
@@ -62,7 +68,8 @@ export async function runSubAgents(ctx: ToolContext, model: string, tasks: SubAg
   const results = await Promise.allSettled(tasks.map((t) => runOne(ctx, model, t)));
   return results
     .map((r, i) => {
-      const head = `## Sub-agent ${i + 1}: ${tasks[i].task.slice(0, 120)}`;
+      const who = tasks[i].agent ? ` (${tasks[i].agent})` : '';
+      const head = `## Sub-agent ${i + 1}${who}: ${tasks[i].task.slice(0, 120)}`;
       return r.status === 'fulfilled' ? `${head}\n${r.value}` : `${head}\nFailed: ${r.reason?.message ?? r.reason}`;
     })
     .join('\n\n');

@@ -9,10 +9,12 @@ import { uid } from './id';
 import { buildApiMessages, extractMemoryOps, stripMemoryTags } from './prompt';
 import * as storage from './storage';
 import { listMcpTools } from './mcp';
+import { pluginAgents, pluginMcpServers, pluginSkills, slashCommands } from './plugins';
+import type { SlashCommand } from './plugins';
 import * as sync from './sync';
 import { formatToolResult, needsApproval, parseToolCall, runTool, stripToolTags } from './tools';
 import type { ToolContext } from './tools';
-import type { Account, Attachment, ChatMessage, Conversation, McpServer, McpTool, Memory, Project, Settings, Skill } from './types';
+import type { Account, Attachment, ChatMessage, Conversation, McpServer, McpTool, Memory, Plugin, Project, Settings, Skill } from './types';
 
 export type SyncStatus = { state: 'idle' | 'syncing' | 'error'; error?: string };
 
@@ -24,6 +26,16 @@ interface Store {
   skills: Skill[];
   projects: Project[];
   mcpServers: McpServer[];
+  plugins: Plugin[];
+  /** MCP servers from enabled plugins (shown read-only; their tools load like any server's). */
+  pluginServers: McpServer[];
+  /** Slash commands from enabled plugins. */
+  commands: SlashCommand[];
+  /** Adds a plugin, or replaces one with the same id (keeping the user's enabled/config/secrets). */
+  installPlugin: (plugin: Plugin) => void;
+  /** Saves changes to an installed plugin (enabled switch, settings). */
+  updatePlugin: (plugin: Plugin) => void;
+  uninstallPlugin: (id: string) => void;
   /** Tools discovered on each MCP server (by server id) and connection errors. */
   mcpTools: Record<string, McpTool[]>;
   mcpErrors: Record<string, string>;
@@ -50,7 +62,8 @@ interface Store {
   renameConversation: (id: string, title: string) => void;
   setConversationModel: (id: string, model: string) => void;
   clearConversations: () => void;
-  send: (conversationId: string, text: string, attachments?: Attachment[]) => Promise<void>;
+  /** `displayText` is shown in the bubble instead of `text` (used for expanded slash commands). */
+  send: (conversationId: string, text: string, attachments?: Attachment[], displayText?: string) => Promise<void>;
   regenerate: (conversationId: string) => Promise<void>;
   stop: (conversationId: string) => void;
   approveTool: (conversationId: string, messageId: string) => Promise<void>;
@@ -97,6 +110,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [skills, setSkills] = useState<Skill[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpTools, setMcpTools] = useState<Record<string, McpTool[]>>({});
   const [mcpErrors, setMcpErrors] = useState<Record<string, string>>({});
@@ -110,6 +124,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const controllers = useRef<Record<string, AbortController>>({});
   const skillsRef = useRef(skills);
   const projectsRef = useRef(projects);
+  const pluginsRef = useRef(plugins);
   const mcpRef = useRef(mcpServers);
   const mcpToolsRef = useRef(mcpTools);
   const accountRef = useRef(account);
@@ -119,6 +134,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   settingsRef.current = settings;
   skillsRef.current = skills;
   projectsRef.current = projects;
+  pluginsRef.current = plugins;
   mcpRef.current = mcpServers;
   mcpToolsRef.current = mcpTools;
   accountRef.current = account;
@@ -133,8 +149,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       storage.loadMcpServers(),
       storage.loadAccount(),
       storage.loadProjects(),
-    ]).then(([s, c, m, k, servers, acct, p]) => {
+      storage.loadPlugins(),
+    ]).then(([s, c, m, k, servers, acct, p, pl]) => {
       setProjects(p);
+      setPlugins(pl);
       setSettings(s);
       setConversations(c);
       setMemories(m);
@@ -145,16 +163,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /** Everything tools need, using the latest state. */
-  const toolCtx = useCallback((model: string): ToolContext => {
-    const base: ToolContext = {
-      settings: settingsRef.current,
-      skills: skillsRef.current,
-      mcpServers: mcpRef.current,
-      mcpTools: mcpToolsRef.current,
-    };
-    return { ...base, runSubAgents: (tasks) => runSubAgents(base, model, tasks) };
-  }, []);
+  /** User MCP servers plus those from enabled plugins. */
+  const allMcpServers = useCallback(() => [...mcpRef.current, ...pluginMcpServers(pluginsRef.current)], []);
+
+  /** Everything tools need, using the latest state. Plugin skills, servers and agents are merged in. */
+  const toolCtx = useCallback(
+    (model: string): ToolContext => {
+      const base: ToolContext = {
+        settings: settingsRef.current,
+        skills: [...skillsRef.current, ...pluginSkills(pluginsRef.current)],
+        mcpServers: allMcpServers(),
+        mcpTools: mcpToolsRef.current,
+        agentProfiles: pluginAgents(pluginsRef.current),
+      };
+      return { ...base, runSubAgents: (tasks) => runSubAgents(base, model, tasks) };
+    },
+    [allMcpServers],
+  );
 
   // Persist with a short debounce so streaming updates don't hammer storage.
   useEffect(() => {
@@ -176,13 +201,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [projects, ready]);
 
   useEffect(() => {
+    if (ready) storage.savePlugins(plugins);
+  }, [plugins, ready]);
+
+  useEffect(() => {
     if (ready) storage.saveMcpServers(mcpServers);
   }, [mcpServers, ready]);
 
   // ---------- MCP ----------
 
   const refreshMcpTools = useCallback(async (serverId?: string) => {
-    const targets = mcpRef.current.filter((x) => x.enabled && (!serverId || x.id === serverId));
+    const targets = allMcpServers().filter((x) => x.enabled && (!serverId || x.id === serverId));
     await Promise.all(
       targets.map(async (server) => {
         try {
@@ -195,10 +224,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       }),
     );
-  }, []);
+  }, [allMcpServers]);
 
-  // Discover MCP tools whenever the server list changes.
-  const mcpKey = mcpServers.map((x) => `${x.id}:${x.url}:${x.enabled}:${x.token ?? ''}`).join('|');
+  // Discover MCP tools whenever the server list (including plugin servers) changes.
+  const pluginServers = pluginMcpServers(plugins);
+  const mcpKey = [...mcpServers, ...pluginServers]
+    .map((x) => `${x.id}:${x.url}:${x.enabled}:${x.token ?? ''}:${JSON.stringify(x.headers ?? {})}`)
+    .join('|');
   useEffect(() => {
     if (ready) refreshMcpTools();
   }, [ready, mcpKey, refreshMcpTools]);
@@ -240,6 +272,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         skills: skillsRef.current,
         mcpServers: mcpRef.current,
         projects: projectsRef.current,
+        plugins: pluginsRef.current,
         settings: settingsRef.current,
       };
       const busyKeys = new Set(Object.keys(busyRef.current).map((id) => `conversations/${id}`));
@@ -253,6 +286,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       setSkills((list) => sync.mergeList(list, items, 'skills', (k) => k.updatedAt));
       setProjects((list) => sync.mergeList(list, items, 'projects', (p) => p.updatedAt));
+      setPlugins((list) =>
+        sync.mergeList(list, items, 'plugins', (p) => p.updatedAt, (data, local) => ({ ...data, secrets: local?.secrets })),
+      );
       setMcpServers((list) =>
         sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, (data, local) => ({ ...data, token: local?.token })),
       );
@@ -307,7 +343,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const t = setTimeout(syncNow, 2500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, account?.token, memories, conversations, skills, projects, mcpServers, settings, busy]);
+  }, [ready, account?.token, memories, conversations, skills, projects, plugins, mcpServers, settings, busy]);
 
   const accountToken = account?.token;
   useEffect(() => {
@@ -344,6 +380,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     setConversations((list) => [conv, ...list]);
     return conv;
+  }, []);
+
+  const installPlugin = useCallback((plugin: Plugin) => {
+    const now = Date.now();
+    setPlugins((list) => {
+      const old = list.find((p) => p.id === plugin.id);
+      const next: Plugin = old
+        ? {
+            ...plugin,
+            enabled: old.enabled,
+            config: { ...plugin.config, ...old.config },
+            secrets: old.secrets,
+            installedAt: old.installedAt,
+            updatedAt: now,
+          }
+        : { ...plugin, updatedAt: now };
+      return old ? list.map((p) => (p.id === plugin.id ? next : p)) : [next, ...list];
+    });
+  }, []);
+
+  const updatePlugin = useCallback((plugin: Plugin) => {
+    setPlugins((list) => list.map((p) => (p.id === plugin.id ? { ...plugin, updatedAt: Date.now() } : p)));
+  }, []);
+
+  const uninstallPlugin = useCallback((id: string) => {
+    setPlugins((list) => list.filter((p) => p.id !== id));
   }, []);
 
   const saveProject = useCallback((project: Project) => {
@@ -557,7 +619,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [patchConversation]);
 
   const send = useCallback(
-    async (conversationId: string, text: string, attachments: Attachment[] = []) => {
+    async (conversationId: string, text: string, attachments: Attachment[] = [], displayText?: string) => {
       const conv = convRef.current.find((c) => c.id === conversationId);
       if (!conv || (!text.trim() && !attachments.length)) return;
       const userMsg: ChatMessage = {
@@ -566,8 +628,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         content: text.trim(),
         createdAt: Date.now(),
         ...(attachments.length ? { attachments } : {}),
+        ...(displayText ? { displayText } : {}),
       };
-      if (conv.messages.length === 0) renameConversation(conversationId, titleFrom(text || attachments[0].name));
+      if (conv.messages.length === 0) renameConversation(conversationId, titleFrom(displayText || text || attachments[0].name));
       await respond(conversationId, [...conv.messages, userMsg]);
     },
     [respond, renameConversation],
@@ -614,6 +677,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         skills,
         projects,
         mcpServers,
+        plugins,
+        pluginServers,
+        commands: slashCommands(plugins),
+        installPlugin,
+        updatePlugin,
+        uninstallPlugin,
         mcpTools,
         mcpErrors,
         account,

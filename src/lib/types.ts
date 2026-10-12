@@ -13,6 +13,8 @@ export interface ChatMessage {
   toolResult?: boolean;
   /** Photos and files the user attached. */
   attachments?: Attachment[];
+  /** What the user typed when `content` is an expanded slash command (shown instead of content). */
+  displayText?: string;
 }
 
 export interface Attachment {
@@ -86,10 +88,94 @@ export interface McpServer {
   url: string;
   /** Sent as `Authorization: Bearer <token>`; kept on this device only. */
   token?: string;
+  /** Extra HTTP headers (used by plugin-provided servers). */
+  headers?: Record<string, string>;
   enabled: boolean;
   /** Ask before every tool call on this server. */
   confirm: boolean;
   updatedAt: number;
+  /** Set for servers that come from a plugin (read-only in the MCP screen). */
+  pluginId?: string;
+}
+
+/**
+ * A plugin in the Claude Code plugin format (.claude-plugin/plugin.json + skills/, commands/,
+ * agents/, .mcp.json). Components a phone can't run (hooks, local MCP servers, LSP, bin/…) are
+ * listed in `unsupported` instead.
+ */
+export interface Plugin {
+  /** `${name}@${marketplace}` for marketplace installs, `${name}@${owner}/${repo}` otherwise. */
+  id: string;
+  name: string;
+  displayName?: string;
+  version?: string;
+  description: string;
+  author?: string;
+  homepage?: string;
+  /** The GitHub link it was installed from (repo, folder or marketplace). */
+  source: string;
+  /** Marketplace name, when installed from one. */
+  marketplace?: string;
+  enabled: boolean;
+  skills: PluginSkill[];
+  commands: PluginCommand[];
+  agents: PluginAgent[];
+  mcpServers: PluginMcpServer[];
+  /** Settings the plugin asks the user for (plugin.json `userConfig`). */
+  userConfig: PluginConfigField[];
+  /** Values for the non-sensitive userConfig fields (synced). */
+  config: Record<string, string | number | boolean>;
+  /** Values for sensitive userConfig fields — kept on this device only, never synced. */
+  secrets?: Record<string, string>;
+  /** Human-readable notes on parts that can't run on a phone, e.g. "Hooks", "2 local MCP servers". */
+  unsupported: string[];
+  installedAt: number;
+  updatedAt: number;
+}
+
+export interface PluginSkill {
+  name: string;
+  description: string;
+  instructions: string;
+}
+
+/** A slash command: `/name args` expands to `content` ($ARGUMENTS, $1…$9 substituted). */
+export interface PluginCommand {
+  name: string;
+  description: string;
+  argumentHint?: string;
+  content: string;
+}
+
+/** A custom agent the main assistant can delegate to through agents.run. */
+export interface PluginAgent {
+  name: string;
+  description: string;
+  /** System prompt (the agent file's Markdown body). */
+  prompt: string;
+  model?: string;
+}
+
+/** A remote MCP server from a plugin. May reference ${user_config.KEY}. */
+export interface PluginMcpServer {
+  name: string;
+  url: string;
+  transport: 'http' | 'sse';
+  headers?: Record<string, string>;
+}
+
+export interface PluginConfigField {
+  key: string;
+  type: 'string' | 'number' | 'boolean' | 'directory' | 'file';
+  title: string;
+  description: string;
+  required?: boolean;
+  default?: string | number | boolean | string[];
+  sensitive?: boolean;
+  options?: string[];
+  multiple?: boolean;
+  min?: number;
+  max?: number;
 }
 
 export interface McpTool {

@@ -1,5 +1,6 @@
 import { callMcpTool, mcpToolName } from './mcp';
 import { normalizeLanguage, runCode } from './runner';
+import type { AgentProfile } from './plugins';
 import type { McpServer, McpTool, Settings, Skill, ToolCall } from './types';
 
 /**
@@ -20,7 +21,9 @@ export interface ToolContext {
   /** Tools discovered on each MCP server, by server id. */
   mcpTools: Record<string, McpTool[]>;
   /** Provided by the store; runs helper agents in parallel and returns their combined answers. */
-  runSubAgents?: (tasks: { task: string; model?: string }[]) => Promise<string>;
+  runSubAgents?: (tasks: { task: string; model?: string; agent?: string }[]) => Promise<string>;
+  /** Custom agents from plugins that sub-agents can run as. */
+  agentProfiles?: AgentProfile[];
 }
 
 interface ToolDef {
@@ -279,7 +282,7 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
       kind: 'agent',
       description:
         'Send up to 5 sub-agents to work in parallel. Each gets one self-contained task (include all context it needs), can use the read-only tools and code.run, and returns its answer. Use for research, comparing options, or splitting big jobs.',
-      params: '{"tasks":[{"task":"...","model":"optional model id"}]}',
+      params: '{"tasks":[{"task":"...","agent":"optional agent name","model":"optional model id"}]}',
       label: (a) => {
         const n = Array.isArray(a.tasks) ? a.tasks.length : 0;
         return `Sent ${n} sub-agent${n === 1 ? '' : 's'}`;
@@ -290,6 +293,11 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
           .filter((t: any) => t?.task)
           .slice(0, 5);
         if (!tasks.length) throw new Error('Give at least one task: {"tasks":[{"task":"..."}]}');
+        const known = new Set((ctx.agentProfiles ?? []).map((p) => p.name));
+        const unknown = tasks.map((t: any) => t.agent).filter((n: any) => n && !known.has(n));
+        if (unknown.length) {
+          throw new Error(`Unknown agent ${unknown.join(', ')}. Available: ${[...known].join(', ') || 'none'}`);
+        }
         return runSubAgents(tasks);
       },
     };
@@ -338,6 +346,14 @@ ${tools.map(([name, t]) => `- ${name} ${t.params} — ${t.description}`).join('\
     parts.push(
       `The user has these skills. When a task matches one, load it with skills.read first and follow it:\n${skills
         .map((k) => `- ${k.name}: ${k.description}`)
+        .join('\n')}`,
+    );
+  }
+  const agents = ctx.agentProfiles ?? [];
+  if (agents.length && tools.some(([n]) => n === 'agents.run')) {
+    parts.push(
+      `Specialist agents you can delegate to with agents.run (set "agent" to the name):\n${agents
+        .map((a) => `- ${a.name}: ${a.description}`)
         .join('\n')}`,
     );
   }
