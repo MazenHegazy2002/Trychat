@@ -130,6 +130,8 @@ export default function SettingsScreen() {
               : 'Add tools from MCP servers',
           ],
           ['/store', 'Store', 'Browse plugins, skills and MCP servers'],
+          ['/files', 'Files', 'Everything sent, received and shared in chats'],
+          ['/friends', 'Friends', 'Share files with friends who have an account'],
           [
             '/plugins',
             'Plugins',

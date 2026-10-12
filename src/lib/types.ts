@@ -27,6 +27,8 @@ export interface Attachment {
   size: number;
   /** Contents of a text/code file, sent to the model. */
   text?: string;
+  /** Where it came from: sent by the user, made by the assistant, shared by a friend, or a project file. */
+  origin?: 'upload' | 'assistant' | 'shared' | 'project';
 }
 
 export type ToolStatus = 'pending' | 'running' | 'done' | 'denied' | 'error';
@@ -36,6 +38,8 @@ export interface ToolCall {
   args: Record<string, unknown>;
   status: ToolStatus;
   result?: string;
+  /** Files the tool sent to the user; shown under the tool card. */
+  files?: Attachment[];
 }
 
 export interface Conversation {
@@ -234,4 +238,32 @@ export interface Settings {
   marketplaces: string[];
   /** When synced preferences last changed (drives last-write-wins across devices). */
   prefsUpdatedAt?: number;
+}
+
+/** Something the model found with store.search and the user approved installing (store.install). */
+export type InstallItem =
+  | { kind: 'plugin'; plugin: Plugin }
+  | { kind: 'skill'; skill: Skill }
+  | { kind: 'mcp'; server: McpServer };
+
+/** Another account the user is friends with (or has a pending request with). */
+export interface Friend {
+  id: string;
+  email: string;
+  name: string;
+  status: 'friends' | 'incoming' | 'outgoing';
+  since: number;
+}
+
+/** A file shared between friends through the account server. */
+export interface SharedFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  owner: { id: string; name: string; email: string };
+  /** Friend ids it is shared with (only listed for the owner). */
+  sharedWith: string[];
+  note?: string;
+  createdAt: number;
 }

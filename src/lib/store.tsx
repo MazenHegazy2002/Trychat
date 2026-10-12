@@ -13,9 +13,9 @@ import { listMcpTools } from './mcp';
 import { pluginAgents, pluginMcpServers, pluginSkills, slashCommands } from './plugins';
 import type { SlashCommand } from './plugins';
 import * as sync from './sync';
-import { formatToolResult, needsApproval, parseToolCall, runTool, stripToolTags } from './tools';
+import { formatToolResult, needsApproval, parseToolCall, runToolCall, stripToolTags } from './tools';
 import type { ToolContext } from './tools';
-import type { Account, Attachment, ChatMessage, Conversation, McpServer, McpTool, Memory, Plugin, Project, Settings, Skill } from './types';
+import type { Account, Attachment, ChatMessage, Conversation, InstallItem, McpServer, McpTool, Memory, Plugin, Project, Settings, Skill } from './types';
 
 export type SyncStatus = { state: 'idle' | 'syncing' | 'error'; error?: string };
 
@@ -68,12 +68,21 @@ interface Store {
   send: (conversationId: string, text: string, attachments?: Attachment[], displayText?: string) => Promise<void>;
   regenerate: (conversationId: string) => Promise<void>;
   stop: (conversationId: string) => void;
-  approveTool: (conversationId: string, messageId: string) => Promise<void>;
+  /**
+   * Runs a pending tool. `extra.args` are merged into the call (kept in the chat); `extra.secrets`
+   * (e.g. API keys typed into an install card) are only passed to this run.
+   */
+  approveTool: (conversationId: string, messageId: string, extra?: ToolApproval) => Promise<void>;
   denyTool: (conversationId: string, messageId: string) => Promise<void>;
   addMemory: (text: string) => void;
   updateMemory: (id: string, text: string) => void;
   deleteMemory: (id: string) => void;
   clearMemories: () => void;
+}
+
+export interface ToolApproval {
+  args?: Record<string, unknown>;
+  secrets?: Record<string, string>;
 }
 
 const StoreContext = createContext<Store | null>(null);
@@ -168,6 +177,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /** User MCP servers plus those from enabled plugins. */
   const allMcpServers = useCallback(() => [...mcpRef.current, ...pluginMcpServers(pluginsRef.current)], []);
 
+  // Set further down (it needs installPlugin, saveSkill and saveMcpServer); used by store.install.
+  const installRef = useRef<(item: InstallItem) => Promise<string>>(async () => 'Not ready');
+
   /** Everything tools need, using the latest state. Plugin skills, servers and agents are merged in. */
   const toolCtx = useCallback(
     (model: string): ToolContext => {
@@ -177,6 +189,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         mcpServers: allMcpServers(),
         mcpTools: mcpToolsRef.current,
         agentProfiles: pluginAgents(pluginsRef.current),
+        account: accountRef.current,
+        install: (item) => installRef.current(item),
       };
       return { ...base, runSubAgents: (tasks) => runSubAgents(base, model, tasks) };
     },
@@ -218,6 +232,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       targets.map(async (server) => {
         try {
           const tools = await listMcpTools(server);
+          // The ref too, so a reply that is already running sees the tools (store.install waits for this).
+          mcpToolsRef.current = { ...mcpToolsRef.current, [server.id]: tools };
           setMcpTools((t) => ({ ...t, [server.id]: tools }));
           setMcpErrors(({ [server.id]: _, ...rest }) => rest);
         } catch (e) {
@@ -411,6 +427,50 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setPlugins((list) => list.filter((p) => p.id !== id));
   }, []);
 
+  /** Lists an MCP server's tools now, so the reply that installed it can use them in its next step. */
+  const discoverTools = async (server: McpServer): Promise<string> => {
+    try {
+      const tools = await listMcpTools(server);
+      mcpToolsRef.current = { ...mcpToolsRef.current, [server.id]: tools };
+      setMcpTools((t) => ({ ...t, [server.id]: tools }));
+      setMcpErrors(({ [server.id]: _, ...rest }) => rest);
+      return `${server.name}: ${tools.length} tool${tools.length === 1 ? '' : 's'} (${tools.map((t) => t.name).join(', ')})`;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setMcpErrors((errs) => ({ ...errs, [server.id]: message }));
+      return `${server.name}: couldn’t connect yet (${message})`;
+    }
+  };
+
+  // store.install: saves what the user approved. Refs are updated right away so the very next model step
+  // (which runs before React re-renders) already sees the new skills, commands and tools.
+  installRef.current = async (item: InstallItem): Promise<string> => {
+    if (item.kind === 'skill') {
+      const skill = { ...item.skill, updatedAt: Date.now() };
+      saveSkill(skill);
+      skillsRef.current = [...skillsRef.current.filter((k) => k.id !== skill.id), skill];
+      return `Installed the skill "${skill.name}". Load it with skills.read.`;
+    }
+    if (item.kind === 'mcp') {
+      const server = { ...item.server, updatedAt: Date.now() };
+      saveMcpServer(server);
+      mcpRef.current = [...mcpRef.current.filter((x) => x.id !== server.id), server];
+      return `Added the MCP server. ${await discoverTools(server)}`;
+    }
+    const plugin = item.plugin;
+    installPlugin(plugin);
+    pluginsRef.current = [{ ...plugin, updatedAt: Date.now() }, ...pluginsRef.current.filter((p) => p.id !== plugin.id)];
+    const servers = pluginMcpServers([plugin]);
+    const found = await Promise.all(servers.map(discoverTools));
+    const parts = [
+      plugin.skills.length && `${plugin.skills.length} skill(s)`,
+      plugin.commands.length && `${plugin.commands.length} command(s)`,
+      plugin.agents.length && `${plugin.agents.length} agent(s)`,
+      servers.length && `${servers.length} MCP server(s)`,
+    ].filter(Boolean);
+    return [`Installed the plugin "${plugin.displayName ?? plugin.name}"${parts.length ? ` with ${parts.join(', ')}` : ''}.`, ...found].join('\n');
+  };
+
   const saveProject = useCallback((project: Project) => {
     const next = { ...project, updatedAt: Date.now() };
     setProjects((list) => (list.some((p) => p.id === project.id) ? list.map((p) => (p.id === project.id ? next : p)) : [next, ...list]));
@@ -478,9 +538,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // respond() and continueAfterTool() call each other; the ref breaks the cycle for useCallback.
-  const continueAfterToolRef = useRef<(conversationId: string, messages: ChatMessage[], messageId: string) => Promise<void>>(
-    async () => {},
-  );
+  const continueAfterToolRef = useRef<
+    (conversationId: string, messages: ChatMessage[], messageId: string, extra?: ToolApproval) => Promise<void>
+  >(async () => {});
 
   /** Runs a completion for the conversation's current history and fills in a new assistant message. */
   const respond = useCallback(
@@ -561,10 +621,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
 
   /** Runs (or skips, if denied/invalid) the tool on a message, then sends the result back to the model. */
-  const continueAfterTool = async (conversationId: string, messages: ChatMessage[], messageId: string) => {
+  const continueAfterTool = async (conversationId: string, messages: ChatMessage[], messageId: string, extra?: ToolApproval) => {
     const msg = messages.find((m) => m.id === messageId);
     if (!msg?.toolCall) return;
     let call = msg.toolCall;
+    if (extra?.args && call.status === 'pending') call = { ...call, args: { ...call.args, ...extra.args } };
     const setCall = (c: typeof call) =>
       patchConversation(conversationId, (conv) => ({
         ...conv,
@@ -580,7 +641,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       controllers.current[conversationId] = controller;
       try {
         const model = convRef.current.find((c) => c.id === conversationId)?.model || settingsRef.current.model;
-        call = { ...call, status: 'done', result: await runTool(call, toolCtx(model)) };
+        const { result, files } = await runToolCall(call, { ...toolCtx(model), approval: { secrets: extra?.secrets } });
+        call = { ...call, status: 'done', result, ...(files ? { files } : {}) };
       } catch (e) {
         call = { ...call, status: 'error', result: e instanceof Error ? e.message : String(e) };
       }
@@ -606,9 +668,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   respondRef.current = respond;
   continueAfterToolRef.current = continueAfterTool;
 
-  const approveTool = useCallback(async (conversationId: string, messageId: string) => {
+  const approveTool = useCallback(async (conversationId: string, messageId: string, extra?: ToolApproval) => {
     const conv = convRef.current.find((c) => c.id === conversationId);
-    if (conv) await continueAfterToolRef.current(conversationId, conv.messages, messageId);
+    if (conv) await continueAfterToolRef.current(conversationId, conv.messages, messageId, extra);
   }, []);
 
   const denyTool = useCallback(async (conversationId: string, messageId: string) => {

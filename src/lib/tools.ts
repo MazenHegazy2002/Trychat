@@ -1,7 +1,13 @@
 import { callMcpTool, mcpToolName } from './mcp';
 import { normalizeLanguage, runCode } from './runner';
+import { fileTools } from './fileTools';
+import { phoneTools } from './phoneTools';
 import type { AgentProfile } from './plugins';
-import type { McpServer, McpTool, Settings, Skill, ToolCall } from './types';
+import { socialTools } from './socialTools';
+import { storeTools } from './storeTools';
+import type { Account, Attachment, InstallItem, McpServer, McpTool, Settings, Skill, ToolCall } from './types';
+import { webTools } from './webTools';
+import { FILES } from './toolResult';
 
 /**
  * Tools the model can use: GitHub (REST API with a personal access token) and the
@@ -10,8 +16,9 @@ import type { McpServer, McpTool, Settings, Skill, ToolCall } from './types';
  * which works with any OpenAI-compatible server, even ones without native tool calling.
  */
 
-type Kind = 'read' | 'write' | 'command' | 'code' | 'agent' | 'mcp';
-export type Service = 'github' | 'laptop' | 'code' | 'agents' | 'skills' | 'mcp';
+/** 'install' always asks the user first. */
+export type Kind = 'read' | 'write' | 'command' | 'code' | 'agent' | 'mcp' | 'install';
+export type Service = 'github' | 'laptop' | 'code' | 'agents' | 'skills' | 'mcp' | 'files' | 'friends' | 'store' | 'phone' | 'web';
 
 /** Everything a tool may need at run time. */
 export interface ToolContext {
@@ -24,9 +31,15 @@ export interface ToolContext {
   runSubAgents?: (tasks: { task: string; model?: string; agent?: string }[]) => Promise<string>;
   /** Custom agents from plugins that sub-agents can run as. */
   agentProfiles?: AgentProfile[];
+  /** The signed-in account (for friends and shared files). */
+  account?: Account | null;
+  /** Provided by the store: saves an approved plugin, skill or MCP server and makes it usable right away. */
+  install?: (item: InstallItem) => Promise<string>;
+  /** Values the user typed into the approval card (e.g. API keys). Never stored in the chat. */
+  approval?: { secrets?: Record<string, string> };
 }
 
-interface ToolDef {
+export interface ToolDef {
   service: Service;
   kind: Kind;
   description: string;
@@ -38,7 +51,9 @@ interface ToolDef {
   server?: McpServer;
 }
 
-type Args = Record<string, any>;
+export type Args = Record<string, any>;
+
+
 
 const MAX_RESULT_CHARS = 12000;
 
@@ -306,6 +321,9 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
     };
   }
 
+  // Files sent to the user, the phone folder, friends & shared files, the Store, and the web.
+  Object.assign(tools, fileTools(ctx), phoneTools(ctx), socialTools(ctx), storeTools(ctx), webTools(ctx));
+
   // Servers whose names slug alike (a user's "Linear API" and plugin linear's "api") would get the same tool names,
   // and the later one would silently replace the earlier one's tools. The first keeps the plain names (user servers
   // come first); later ones are named like "Linear API 2", so every tool name maps to exactly one server.
@@ -410,6 +428,13 @@ const SERVICE_OF_PREFIX: Record<string, Service> = {
   agents: 'agents',
   skills: 'skills',
   mcp: 'mcp',
+  // Tool name prefixes of the feature tool sets: files.*, phone.*, friends.* / shared.*, store.*, web.*
+  files: 'files',
+  phone: 'phone',
+  friends: 'friends',
+  shared: 'friends',
+  store: 'store',
+  web: 'web',
 };
 
 export function toolService(call: ToolCall): Service | null {
@@ -439,6 +464,8 @@ export function needsApproval(call: ToolCall, ctx: ToolContext): boolean {
       return s.confirmWrites;
     case 'mcp':
       return def.server?.confirm ?? true;
+    case 'install':
+      return true;
     case 'code':
     case 'agent':
       return false;
@@ -447,12 +474,20 @@ export function needsApproval(call: ToolCall, ctx: ToolContext): boolean {
   }
 }
 
-export async function runTool(call: ToolCall, ctx: ToolContext): Promise<string> {
+/** Runs a tool; `files` are any files it sent to the user. */
+export async function runToolCall(call: ToolCall, ctx: ToolContext): Promise<{ result: string; files?: Attachment[] }> {
   const def = getTools(ctx)[call.name];
   if (!def) throw new Error(`Unknown or unavailable tool "${call.name}"`);
-  const out = await def.run(ctx, call.args);
-  const text = typeof out === 'string' ? out : JSON.stringify(out, null, 2);
-  return text.length > MAX_RESULT_CHARS ? text.slice(0, MAX_RESULT_CHARS) + '\n…[truncated]' : text;
+  const out: any = await def.run(ctx, call.args);
+  const files: Attachment[] | undefined = out && typeof out === 'object' && out[FILES] ? out.files : undefined;
+  const value = files ? out.text : out;
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  const result = text.length > MAX_RESULT_CHARS ? text.slice(0, MAX_RESULT_CHARS) + '\n…[truncated]' : text;
+  return files?.length ? { result, files } : { result };
+}
+
+export async function runTool(call: ToolCall, ctx: ToolContext): Promise<string> {
+  return (await runToolCall(call, ctx)).result;
 }
 
 /** Re-serialises a call so the model sees its own earlier tool use in the history. */

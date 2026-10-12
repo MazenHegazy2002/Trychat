@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AttachSheet, MessageAttachments, PendingAttachments } from '../../components/Attachments';
 import type { AttachSource } from '../../components/Attachments';
+import { FileCards } from '../../components/FileCards';
 import { Icon } from '../../components/ui';
 import { MONO, SlashMenu, isTypingSlashCommand } from '../../components/SlashMenu';
 import { pickFiles, pickImages, takePhoto } from '../../lib/attachments';
@@ -150,9 +151,12 @@ export default function ChatScreen() {
         {item.toolCall && (
           <ToolCallCard
             call={item.toolCall}
-            onApprove={() => store.approveTool(id, item.id)}
+            onApprove={(extra) => store.approveTool(id, item.id, extra)}
             onDeny={() => store.denyTool(id, item.id)}
           />
+        )}
+        {!!item.toolCall?.files?.length && (
+          <FileCards files={item.toolCall.files} conversationId={id} />
         )}
         {streaming && !item.content && !item.toolCall && <ActivityIndicator color={theme.muted} style={{ alignSelf: 'flex-start' }} />}
         {!!item.error && (

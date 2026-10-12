@@ -3,11 +3,13 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 
 import { useTheme } from '../lib/theme';
 import { toolLabel, toolService } from '../lib/tools';
+import type { ToolApproval } from '../lib/store';
 import type { ToolCall } from '../lib/types';
 
 interface Props {
   call: ToolCall;
-  onApprove: () => void;
+  /** `extra` carries values typed into the card (see store.approveTool). */
+  onApprove: (extra?: ToolApproval) => void;
   onDeny: () => void;
 }
 
@@ -30,6 +32,11 @@ export function ToolCallCard({ call, onApprove, onDeny }: Props) {
       laptop: 'Laptop',
       code: 'Code',
       agents: 'Agents',
+      files: 'Files',
+      phone: 'Phone',
+      friends: 'Friends',
+      store: 'Store',
+      web: 'Web',
       skills: 'Skill',
       mcp: call.name.split('.')[1] ?? 'MCP',
     }[service ?? 'code'] ?? 'Tool';
@@ -96,7 +103,7 @@ export function ToolCallCard({ call, onApprove, onDeny }: Props) {
         </ScrollView>
       )}
       <View style={styles.buttons}>
-        <Pressable onPress={onApprove} style={[styles.button, { backgroundColor: theme.text }]}>
+        <Pressable onPress={() => onApprove()} style={[styles.button, { backgroundColor: theme.text }]}>
           <Text style={{ color: theme.bg, fontWeight: '700' }}>
             {service === 'laptop' && call.name === 'laptop.run' ? 'Run' : 'Allow'}
           </Text>
