@@ -1,6 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
@@ -83,7 +84,7 @@ export default function ConnectionsScreen() {
   );
 
   return (
-    <ScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
       <Text style={{ color: theme.muted, fontSize: 15, lineHeight: 21 }}>
         TryChat can read and change code on GitHub and run tasks on your laptop. You approve commands and changes before
         they happen.
@@ -155,7 +156,7 @@ export default function ConnectionsScreen() {
       <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <Text style={[styles.title, { color: theme.text }]}>Laptop</Text>
         <Text style={[styles.help, { color: theme.muted, marginTop: 4 }]}>
-          On your laptop, from this project's folder, start the bridge (Node 18+). It prints the address and pairing code
+          On your laptop, from this project’s folder, start the bridge (Node 18+). It prints the address and pairing code
           to enter here. Your phone and laptop must be on the same Wi-Fi.
         </Text>
         <Pressable
@@ -216,7 +217,7 @@ export default function ConnectionsScreen() {
           </View>
         ))}
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

@@ -11,6 +11,20 @@ export interface ChatMessage {
   toolCall?: ToolCall;
   /** Marks a user-role message that carries a tool result back to the model. */
   toolResult?: boolean;
+  /** Photos and files the user attached. */
+  attachments?: Attachment[];
+}
+
+export interface Attachment {
+  id: string;
+  kind: 'image' | 'file';
+  name: string;
+  mimeType: string;
+  /** Local copy on this device (file://…). */
+  uri: string;
+  size: number;
+  /** Contents of a text/code file, sent to the model. */
+  text?: string;
 }
 
 export type ToolStatus = 'pending' | 'running' | 'done' | 'denied' | 'error';

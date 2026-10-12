@@ -5,16 +5,20 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AttachSheet, MessageAttachments, PendingAttachments } from '../../components/Attachments';
+import type { AttachSource } from '../../components/Attachments';
+import { Icon } from '../../components/ui';
+import { pickFiles, pickImages, takePhoto } from '../../lib/attachments';
 import { Markdown } from '../../components/Markdown';
 import { ModelPicker } from '../../components/ModelPicker';
 import { ToolCallCard } from '../../components/ToolCallCard';
@@ -22,7 +26,7 @@ import { TextPrompt } from '../../components/TextPrompt';
 import { useStore } from '../../lib/store';
 import { githubConnected, laptopConnected } from '../../lib/tools';
 import { useTheme } from '../../lib/theme';
-import type { ChatMessage } from '../../lib/types';
+import type { Attachment, ChatMessage } from '../../lib/types';
 
 const SUGGESTIONS = [
   'Build me a to-do list app',
@@ -51,6 +55,10 @@ export default function ChatScreen() {
   const [input, setInput] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [pending, setPending] = useState<Attachment[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const keyboardVisible = useKeyboardState((k) => k.isVisible);
 
   if (!conv) {
     return (
@@ -63,10 +71,26 @@ export default function ChatScreen() {
   const model = conv.model || store.settings.model;
   const lastAssistantId = [...conv.messages].reverse().find((m) => m.role === 'assistant')?.id;
 
+  const canSend = !!input.trim() || pending.length > 0;
+
   const send = (text = input) => {
-    if (!text.trim() || busy) return;
+    if ((!text.trim() && !pending.length) || busy || attaching) return;
     setInput('');
-    store.send(id, text);
+    const attachments = pending;
+    setPending([]);
+    store.send(id, text, attachments);
+  };
+
+  const attach = async (source: AttachSource) => {
+    setAttaching(true);
+    try {
+      const added = await (source === 'photos' ? pickImages() : source === 'camera' ? takePhoto() : pickFiles());
+      setPending((p) => [...p, ...added].slice(0, 10));
+    } catch (e) {
+      Alert.alert("Couldn't attach", e instanceof Error ? e.message : String(e));
+    } finally {
+      setAttaching(false);
+    }
   };
 
   const onMessageLongPress = (m: ChatMessage) => {
@@ -82,11 +106,14 @@ export default function ChatScreen() {
     if (item.role === 'user') {
       return (
         <Pressable onLongPress={() => onMessageLongPress(item)} style={styles.userRow}>
-          <View style={[styles.userBubble, { backgroundColor: theme.userBubble }]}>
-            <Text selectable style={{ color: theme.onUserBubble, fontSize: 16, lineHeight: 22 }}>
-              {item.content}
-            </Text>
-          </View>
+          {!!item.attachments?.length && <MessageAttachments items={item.attachments} />}
+          {!!item.content && (
+            <View style={[styles.userBubble, { backgroundColor: theme.userBubble }]}>
+              <Text selectable style={{ color: theme.onUserBubble, fontSize: 16, lineHeight: 22 }}>
+                {item.content}
+              </Text>
+            </View>
+          )}
         </Pressable>
       );
     }
@@ -125,11 +152,9 @@ export default function ChatScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: theme.bg }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={insets.top + 44}
-    >
+    // Android draws edge-to-edge, so the window no longer shrinks for the keyboard:
+    // keyboard-controller pads the screen by the keyboard's height on both platforms.
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.bg }} behavior="padding" automaticOffset>
       <Stack.Screen
         options={{
           headerTitle: () => (
@@ -151,7 +176,7 @@ export default function ChatScreen() {
       />
 
       {conv.messages.length === 0 ? (
-        <View style={[styles.center, { padding: 24 }]}>
+        <ScrollView contentContainerStyle={[styles.emptyState, { padding: 24 }]} keyboardShouldPersistTaps="handled">
           <View style={[styles.mark, { backgroundColor: theme.accent }]}>
             <Text style={{ color: '#FFFFFF', fontSize: 20, fontWeight: '700' }}>T</Text>
           </View>
@@ -180,7 +205,7 @@ export default function ChatScreen() {
               <Text style={{ color: theme.danger }}>No model selected — open Settings</Text>
             </Pressable>
           )}
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           inverted
@@ -193,35 +218,58 @@ export default function ChatScreen() {
         />
       )}
 
-      <View
-        style={[
-          styles.composer,
-          { borderTopColor: theme.border, paddingBottom: Math.max(insets.bottom, 8), backgroundColor: theme.bg },
-        ]}
-      >
-        <TextInput
-          value={input}
-          onChangeText={setInput}
-          placeholder="Message"
-          placeholderTextColor={theme.muted}
-          multiline
-          style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderWidth: 1, borderColor: theme.border }]}
-        />
-        {busy ? (
-          <Pressable onPress={() => store.stop(id)} style={[styles.sendBtn, { backgroundColor: theme.text }]}>
-            <Text style={[styles.sendIcon, { color: theme.bg }]}>■</Text>
-          </Pressable>
-        ) : (
-          <Pressable
-            onPress={() => send()}
-            disabled={!input.trim()}
-            style={[styles.sendBtn, { backgroundColor: input.trim() ? theme.accent : theme.surface2 }]}
-          >
-            <Text style={styles.sendIcon}>↑</Text>
-          </Pressable>
-        )}
+      <View style={[styles.composerWrap, { paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 10) }]}>
+        <View style={[styles.composer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <PendingAttachments items={pending} onRemove={(aid) => setPending((p) => p.filter((x) => x.id !== aid))} />
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            placeholder={conv.messages.length ? 'Reply to TryChat' : 'How can I help you today?'}
+            placeholderTextColor={theme.faint}
+            multiline
+            style={[styles.input, { color: theme.text }]}
+            accessibilityLabel="Message"
+          />
+          <View style={styles.composerRow}>
+            <Pressable
+              onPress={() => setAttachOpen(true)}
+              disabled={attaching}
+              style={[styles.roundBtn, { borderColor: theme.border }]}
+              accessibilityLabel="Attach photos or files"
+              hitSlop={4}
+            >
+              {attaching ? <ActivityIndicator size="small" color={theme.muted} /> : <Icon name="plus" size={20} color={theme.text} />}
+            </Pressable>
+            <Pressable onPress={() => setPickerOpen(true)} style={styles.modelChip} accessibilityLabel="Choose model" hitSlop={4}>
+              <Text style={{ color: theme.muted, fontSize: 13 }} numberOfLines={1}>
+                {model || 'Choose model'}
+              </Text>
+              <Icon name="chevron-down" size={14} />
+            </Pressable>
+            <View style={{ flex: 1 }} />
+            {busy ? (
+              <Pressable
+                onPress={() => store.stop(id)}
+                style={[styles.sendBtn, { backgroundColor: theme.text }]}
+                accessibilityLabel="Stop generating"
+              >
+                <Icon name="square" size={14} color={theme.bg} />
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => send()}
+                disabled={!canSend || attaching}
+                style={[styles.sendBtn, { backgroundColor: canSend ? theme.accent : theme.surface2 }]}
+                accessibilityLabel="Send"
+              >
+                <Icon name="arrow-up" size={20} color={canSend ? '#FFFFFF' : theme.faint} />
+              </Pressable>
+            )}
+          </View>
+        </View>
       </View>
 
+      <AttachSheet visible={attachOpen} onClose={() => setAttachOpen(false)} onPick={attach} />
       <ModelPicker
         visible={pickerOpen}
         selected={model}
@@ -241,6 +289,7 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  emptyState: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
   mark: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   userRow: { alignItems: 'flex-end', paddingHorizontal: 12, marginVertical: 6 },
   userBubble: { maxWidth: '85%', borderRadius: 18, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 9 },
@@ -248,8 +297,11 @@ const styles = StyleSheet.create({
   error: { borderWidth: 1, borderRadius: 10, padding: 10, marginTop: 6 },
   actions: { flexDirection: 'row', gap: 18, marginTop: 8 },
   suggestion: { width: '100%', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 8 },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
-  input: { flex: 1, maxHeight: 140, minHeight: 42, borderRadius: 21, paddingHorizontal: 16, paddingTop: 11, paddingBottom: 11, fontSize: 16 },
-  sendBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  sendIcon: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  composerWrap: { paddingHorizontal: 12, paddingTop: 6 },
+  composer: { borderWidth: 1, borderRadius: 24, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 8 },
+  input: { maxHeight: 160, minHeight: 40, fontSize: 16, paddingHorizontal: 4, paddingVertical: 8 },
+  composerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  roundBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  modelChip: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 40, maxWidth: 170, paddingHorizontal: 6 },
+  sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
 });

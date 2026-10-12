@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel } from '../components/ui';
@@ -50,7 +51,7 @@ export default function SkillsScreen() {
           ),
         }}
       />
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
         <ScreenIntro title="Your skills">Playbooks TryChat loads when a task matches. They sync with your account.</ScreenIntro>
 
         {skills.length > 0 ? (
@@ -125,11 +126,11 @@ export default function SkillsScreen() {
             </Card>
           </>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <Modal visible={!!editing} animationType="slide" onRequestClose={() => setEditing(null)}>
         {editing && (
-          <ScrollView
+          <KeyboardAwareScrollView
             style={{ backgroundColor: theme.bg }}
             contentContainerStyle={{ padding: 20, paddingTop: insets.top + 12, paddingBottom: 48 }}
             keyboardShouldPersistTaps="handled"
@@ -192,7 +193,7 @@ export default function SkillsScreen() {
                 <Text style={{ color: theme.danger, fontWeight: '600' }}>Delete skill</Text>
               </Pressable>
             )}
-          </ScrollView>
+          </KeyboardAwareScrollView>
         )}
       </Modal>
     </View>

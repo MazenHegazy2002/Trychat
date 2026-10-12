@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -22,21 +22,21 @@ export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
 
-  useEffect(() => {
-    if (!visible) return;
+  // Loaded each time the sheet opens (from the Modal's onShow event).
+  const load = () => {
     setLoading(true);
     setError('');
     listModels(settings)
       .then(setModels)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [visible, settings]);
+  };
 
   const filtered = models.filter((m) => m.toLowerCase().includes(query.toLowerCase()));
   const custom = query.trim() && !models.includes(query.trim()) ? query.trim() : '';
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} transparent>
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose} onShow={load} transparent>
       <View style={styles.backdrop}>
         <View style={[styles.sheet, { backgroundColor: theme.bg, paddingBottom: insets.bottom + 12 }]}>
           <View style={styles.header}>
@@ -57,7 +57,7 @@ export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
           {loading && <ActivityIndicator style={{ margin: 16 }} color={theme.primary} />}
           {!!error && (
             <Text style={{ color: theme.danger, margin: 12 }}>
-              Couldn't load models: {error}
+              Couldn’t load models: {error}
               {'\n'}You can still type a model id above.
             </Text>
           )}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useTheme } from '../lib/theme';
@@ -14,13 +14,18 @@ interface Props {
 }
 
 /** Cross-platform replacement for the iOS-only Alert.prompt. */
-export function TextPrompt({ visible, title, initialValue = '', placeholder, multiline, onSubmit, onClose }: Props) {
+export function TextPrompt(props: Props) {
+  return (
+    <Modal visible={props.visible} transparent animationType="fade" onRequestClose={props.onClose}>
+      {/* Mounted only while open, so each opening starts from initialValue. */}
+      {props.visible && <PromptBody {...props} />}
+    </Modal>
+  );
+}
+
+function PromptBody({ title, initialValue = '', placeholder, multiline, onSubmit, onClose }: Props) {
   const theme = useTheme();
   const [value, setValue] = useState(initialValue);
-
-  useEffect(() => {
-    if (visible) setValue(initialValue);
-  }, [visible, initialValue]);
 
   const submit = () => {
     if (value.trim()) onSubmit(value.trim());
@@ -28,34 +33,32 @@ export function TextPrompt({ visible, title, initialValue = '', placeholder, mul
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.backdrop}>
-        <View style={[styles.card, { backgroundColor: theme.bg }]}>
-          <Text style={{ color: theme.text, fontSize: 17, fontWeight: '700', marginBottom: 12 }}>{title}</Text>
-          <TextInput
-            value={value}
-            onChangeText={setValue}
-            placeholder={placeholder}
-            placeholderTextColor={theme.muted}
-            autoFocus
-            multiline={multiline}
-            onSubmitEditing={multiline ? undefined : submit}
-            style={[
-              styles.input,
-              { backgroundColor: theme.surface, color: theme.text, minHeight: multiline ? 90 : undefined },
-            ]}
-          />
-          <View style={styles.actions}>
-            <Pressable onPress={onClose} hitSlop={8}>
-              <Text style={{ color: theme.muted, fontSize: 16 }}>Cancel</Text>
-            </Pressable>
-            <Pressable onPress={submit} hitSlop={8}>
-              <Text style={{ color: theme.primary, fontSize: 16, fontWeight: '700' }}>Save</Text>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.backdrop}>
+      <View style={[styles.card, { backgroundColor: theme.bg }]}>
+        <Text style={{ color: theme.text, fontSize: 17, fontWeight: '700', marginBottom: 12 }}>{title}</Text>
+        <TextInput
+          value={value}
+          onChangeText={setValue}
+          placeholder={placeholder}
+          placeholderTextColor={theme.muted}
+          autoFocus
+          multiline={multiline}
+          onSubmitEditing={multiline ? undefined : submit}
+          style={[
+            styles.input,
+            { backgroundColor: theme.surface, color: theme.text, minHeight: multiline ? 90 : undefined },
+          ]}
+        />
+        <View style={styles.actions}>
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Text style={{ color: theme.muted, fontSize: 16 }}>Cancel</Text>
+          </Pressable>
+          <Pressable onPress={submit} hitSlop={8}>
+            <Text style={{ color: theme.primary, fontSize: 16, fontWeight: '700' }}>Save</Text>
             </Pressable>
           </View>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
   );
 }
 

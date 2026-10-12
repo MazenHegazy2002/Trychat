@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { AppState } from 'react-native';
 
 import { runSubAgents } from './agents';
+import { deleteAttachmentFiles, messageContent } from './attachments';
 import { chat } from './api';
 import { uid } from './id';
 import { buildApiMessages, extractMemoryOps, stripMemoryTags } from './prompt';
@@ -11,7 +12,7 @@ import { listMcpTools } from './mcp';
 import * as sync from './sync';
 import { formatToolResult, needsApproval, parseToolCall, runTool, stripToolTags } from './tools';
 import type { ToolContext } from './tools';
-import type { Account, ChatMessage, Conversation, McpServer, McpTool, Memory, Settings, Skill } from './types';
+import type { Account, Attachment, ChatMessage, Conversation, McpServer, McpTool, Memory, Settings, Skill } from './types';
 
 export type SyncStatus = { state: 'idle' | 'syncing' | 'error'; error?: string };
 
@@ -43,7 +44,7 @@ interface Store {
   renameConversation: (id: string, title: string) => void;
   setConversationModel: (id: string, model: string) => void;
   clearConversations: () => void;
-  send: (conversationId: string, text: string) => Promise<void>;
+  send: (conversationId: string, text: string, attachments?: Attachment[]) => Promise<void>;
   regenerate: (conversationId: string) => Promise<void>;
   stop: (conversationId: string) => void;
   approveTool: (conversationId: string, messageId: string) => Promise<void>;
@@ -291,15 +292,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, account?.token, memories, conversations, skills, mcpServers, settings, busy]);
 
+  const accountToken = account?.token;
   useEffect(() => {
-    if (!ready || !account) return;
+    if (!ready || !accountToken) return;
     const interval = setInterval(syncNow, 60_000);
     const sub = AppState.addEventListener('change', (st) => st === 'active' && syncNow());
     return () => {
       clearInterval(interval);
       sub.remove();
     };
-  }, [ready, account?.token, syncNow]);
+  }, [ready, accountToken, syncNow]);
 
   const patchConversation = useCallback((id: string, fn: (c: Conversation) => Conversation) => {
     setConversations((list) => list.map((c) => (c.id === id ? fn(c) : c)));
@@ -328,6 +330,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const deleteConversation = useCallback((id: string) => {
     controllers.current[id]?.abort();
+    deleteAttachmentFiles(convRef.current.find((c) => c.id === id)?.messages.flatMap((m) => m.attachments ?? []));
     setConversations((list) => list.filter((c) => c.id !== id));
   }, []);
 
@@ -371,6 +374,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // respond() and continueAfterTool() call each other; the ref breaks the cycle for useCallback.
+  const continueAfterToolRef = useRef<(conversationId: string, messages: ChatMessage[], messageId: string) => Promise<void>>(
+    async () => {},
+  );
+
   /** Runs a completion for the conversation's current history and fills in a new assistant message. */
   const respond = useCallback(
     async (conversationId: string, history: ChatMessage[]) => {
@@ -405,7 +413,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         raw = await chat({
           settings: s,
           model,
-          messages: buildApiMessages(toolCtx(model), memRef.current, history),
+          messages: buildApiMessages(toolCtx(model), memRef.current, history, await messageContent(history)),
           signal: controller.signal,
           onText: (text) => {
             raw = text;
@@ -438,9 +446,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         endBusy(conversationId); // wait for the user to approve or deny
         return;
       }
-      await continueAfterTool(conversationId, [...history, finished], finished.id);
+      await continueAfterToolRef.current(conversationId, [...history, finished], finished.id);
     },
-    [patchConversation, applyMemoryOps, toolCtx],
+    [patchConversation, applyMemoryOps, toolCtx, endBusy],
   );
 
   /** Runs (or skips, if denied/invalid) the tool on a message, then sends the result back to the model. */
@@ -487,11 +495,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const respondRef = useRef(respond);
   respondRef.current = respond;
+  continueAfterToolRef.current = continueAfterTool;
 
   const approveTool = useCallback(async (conversationId: string, messageId: string) => {
     const conv = convRef.current.find((c) => c.id === conversationId);
-    if (conv) await continueAfterTool(conversationId, conv.messages, messageId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (conv) await continueAfterToolRef.current(conversationId, conv.messages, messageId);
   }, []);
 
   const denyTool = useCallback(async (conversationId: string, messageId: string) => {
@@ -501,16 +509,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       m.id === messageId && m.toolCall ? { ...m, toolCall: { ...m.toolCall, status: 'denied' as const } } : m,
     );
     patchConversation(conversationId, (c) => ({ ...c, messages }));
-    await continueAfterTool(conversationId, messages, messageId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    await continueAfterToolRef.current(conversationId, messages, messageId);
+  }, [patchConversation]);
 
   const send = useCallback(
-    async (conversationId: string, text: string) => {
+    async (conversationId: string, text: string, attachments: Attachment[] = []) => {
       const conv = convRef.current.find((c) => c.id === conversationId);
-      if (!conv || !text.trim()) return;
-      const userMsg: ChatMessage = { id: uid(), role: 'user', content: text.trim(), createdAt: Date.now() };
-      if (conv.messages.length === 0) renameConversation(conversationId, titleFrom(text));
+      if (!conv || (!text.trim() && !attachments.length)) return;
+      const userMsg: ChatMessage = {
+        id: uid(),
+        role: 'user',
+        content: text.trim(),
+        createdAt: Date.now(),
+        ...(attachments.length ? { attachments } : {}),
+      };
+      if (conv.messages.length === 0) renameConversation(conversationId, titleFrom(text || attachments[0].name));
       await respond(conversationId, [...conv.messages, userMsg]);
     },
     [respond, renameConversation],

@@ -1,4 +1,4 @@
-import type { ApiMessage } from './api';
+import type { ApiContentPart, ApiMessage } from './api';
 import { formatToolCall, toolInstructions } from './tools';
 import type { ToolContext } from './tools';
 import type { ChatMessage, Memory } from './types';
@@ -33,16 +33,24 @@ export function buildSystemPrompt(ctx: ToolContext, memories: Memory[]): string 
   return parts.filter(Boolean).join('\n\n');
 }
 
-export function buildApiMessages(ctx: ToolContext, memories: Memory[], history: ChatMessage[]): ApiMessage[] {
+export function buildApiMessages(
+  ctx: ToolContext,
+  memories: Memory[],
+  history: ChatMessage[],
+  /** Content for messages with attachments (text + images), keyed by message id. */
+  attachmentContent: Map<string, string | ApiContentPart[]> = new Map(),
+): ApiMessage[] {
   const settings = ctx.settings;
   const recent = history
-    .filter((m) => !m.error && (m.content.trim() || m.toolCall))
+    .filter((m) => !m.error && (m.content.trim() || m.toolCall || m.attachments?.length))
     .slice(-Math.max(1, settings.contextMessages));
   return [
     { role: 'system', content: buildSystemPrompt(ctx, memories) },
     ...recent.map((m) => ({
       role: m.role,
-      content: m.toolCall ? `${m.content}\n\n${formatToolCall(m.toolCall)}`.trim() : m.content,
+      content: m.toolCall
+        ? `${m.content}\n\n${formatToolCall(m.toolCall)}`.trim()
+        : (attachmentContent.get(m.id) ?? m.content),
     })),
   ];
 }

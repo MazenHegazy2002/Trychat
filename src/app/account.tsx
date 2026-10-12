@@ -1,6 +1,7 @@
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Card, Divider, Icon, PillButton, SectionLabel } from '../components/ui';
 import type { IconName } from '../components/ui';
@@ -38,7 +39,7 @@ function SignedIn() {
   ];
 
   return (
-    <ScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page}>
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page}>
       <Stack.Screen options={{ title: 'Account' }} />
       <View style={{ alignItems: 'center', marginBottom: 24 }}>
         <View style={[styles.avatar, { backgroundColor: theme.oat }]}>
@@ -97,7 +98,7 @@ function SignedIn() {
       >
         <Text style={{ color: theme.danger, fontWeight: '600', fontSize: 15 }}>Sign out</Text>
       </Pressable>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 
@@ -136,7 +137,7 @@ function SignInForm() {
   ];
 
   return (
-    <ScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
       <Stack.Screen options={{ title: '' }} />
       <View style={{ alignItems: 'center' }}>
         <View style={[styles.mark, { backgroundColor: theme.accent }]}>
@@ -249,7 +250,7 @@ function SignInForm() {
       <Text style={{ color: theme.faint, fontSize: 12, textAlign: 'center', marginTop: 16 }}>
         Keys and tokens never leave this device.
       </Text>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

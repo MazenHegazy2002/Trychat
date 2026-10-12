@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, TextAction } from '../components/ui';
 import { uid } from '../lib/id';
@@ -31,7 +32,7 @@ export default function McpScreen() {
     ]);
 
   return (
-    <ScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
       <ScreenIntro title="Connect more tools">
         Add remote MCP servers and their tools show up in chat. You approve each call unless you turn that off.
       </ScreenIntro>
@@ -55,7 +56,7 @@ export default function McpScreen() {
 
               <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
                 {!server.enabled ? (
-                  <Text style={{ color: theme.muted, fontSize: 13 }}>Off — its tools aren't offered to the model.</Text>
+                  <Text style={{ color: theme.muted, fontSize: 13 }}>Off — its tools aren’t offered to the model.</Text>
                 ) : error ? (
                   <View style={styles.status}>
                     <Icon name="alert-circle" size={16} color={theme.danger} />
@@ -152,7 +153,7 @@ export default function McpScreen() {
       ) : (
         <PillButton title="Add MCP server" icon="plus" onPress={() => setDraft(blank())} style={{ marginTop: 20 }} />
       )}
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

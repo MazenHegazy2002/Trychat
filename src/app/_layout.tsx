@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import { CodeRunnerHost } from '../components/CodeRunnerHost';
 import { StoreProvider, useStore } from '../lib/store';
@@ -42,10 +43,12 @@ function Navigator() {
 
 export default function RootLayout() {
   return (
-    <StoreProvider>
-      <StatusBar style="auto" />
-      <Navigator />
-      <CodeRunnerHost />
-    </StoreProvider>
+    <KeyboardProvider>
+      <StoreProvider>
+        <StatusBar style="auto" />
+        <Navigator />
+        <CodeRunnerHost />
+      </StoreProvider>
+    </KeyboardProvider>
   );
 }

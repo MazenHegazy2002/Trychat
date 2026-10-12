@@ -4,9 +4,14 @@ import type { Role, Settings } from './types';
 
 /** Client for an OpenAI-compatible server (`/models`, `/chat/completions`). */
 
+export type ApiContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export interface ApiMessage {
   role: Role;
-  content: string;
+  /** Plain text, or text + images in the OpenAI vision format. */
+  content: string | ApiContentPart[];
 }
 
 function endpoint(settings: Settings, path: string): string {

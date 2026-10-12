@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { ModelPicker } from '../components/ModelPicker';
 import { listModels } from '../lib/api';
@@ -43,7 +44,7 @@ export default function SettingsScreen() {
   const inputStyle = [styles.input, { backgroundColor: theme.surface, color: theme.text }];
 
   return (
-    <ScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
       <Pressable
         onPress={() => router.push('/account')}
         style={[inputStyle, { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 }]}
@@ -229,7 +230,7 @@ export default function SettingsScreen() {
         onSelect={(m) => set('model', m)}
         onClose={() => setPickerOpen(false)}
       />
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 
