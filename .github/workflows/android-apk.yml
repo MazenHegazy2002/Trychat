@@ -56,6 +56,9 @@ jobs:
           path: TryChat-*.apk
 
       - name: Publish as a pre-release
+        # Needs Settings → Actions → General → Workflow permissions → "Read and write".
+        # If that's off, the APK is still available from the run's artifacts.
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-${{ github.run_number }}
