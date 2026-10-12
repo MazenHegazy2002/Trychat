@@ -853,10 +853,12 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
   const needsLocalFiles = /\$\{CLAUDE_PLUGIN_(ROOT|DATA)\}/;
   // A phone has no environment: ${VAR} / ${VAR:-default} in a remote server's URL or headers
   // become plugin settings (${user_config.VAR}), filled in by the runtime like any userConfig value.
+  // ${VAR} is required, ${VAR:-} optional with no default. Sensitivity ignores defaults: a token
+  // with a fallback (often ${TOKEN:-}) is still a token and must never land in synced config.
   const envToConfig = (text: string, serverName: string, secretHint: boolean) =>
     text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (_m, key: string, def: string | undefined) => {
       if (!userConfig.some((f) => f.key === key)) {
-        const secret = def === undefined && (secretHint || /token|key|secret|password|passwd|auth|credential|pat$/i.test(key));
+        const secret = secretHint || /token|key|secret|password|passwd|auth|credential|pat$/i.test(key);
         const field: PluginConfigField = {
           key,
           type: 'string',
@@ -864,7 +866,7 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
           description: `Used by the “${serverName}” MCP server (the ${key} environment variable in Claude Code).`,
         };
         if (def === undefined) field.required = true;
-        else field.default = def;
+        else if (def !== '') field.default = def;
         if (secret) field.sensitive = true;
         userConfig.push(field);
       }
@@ -936,10 +938,8 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
   }
 
   // --- Metadata -------------------------------------------------------------------------------
+  // `config` only holds values the user sets; until then the runtime uses each field's default.
   const config: Plugin['config'] = {};
-  for (const f of userConfig) {
-    if (!f.sensitive && f.default !== undefined && !Array.isArray(f.default)) config[f.key] = f.default;
-  }
   const author = str(m.author) ?? (isObj(m.author) ? str(m.author.name) : undefined);
   const repoUrl = str(m.repository) ?? (isObj(m.repository) ? str(m.repository.url) : undefined);
   const homepage = str(m.homepage) ?? (repoUrl && /^https?:\/\//i.test(repoUrl) ? repoUrl : undefined);
@@ -1219,7 +1219,7 @@ async function discoverPlugins(ctx: Ctx, tree: RepoTree, dir: string, source: st
 /**
  * Looks at a GitHub link: a marketplace (has .claude-plugin/marketplace.json) → its entries;
  * otherwise a single plugin (plugin.json and/or standard component folders) → the parsed plugin,
- * ready to save (enabled: true, config defaults applied, unsupported parts listed).
+ * ready to save (enabled: true, no settings yet so defaults apply, unsupported parts listed).
  */
 export async function inspectGithubSource(link: string, githubToken?: string): Promise<InstallTarget> {
   const ref = parseGithubLink(link);
@@ -1271,4 +1271,28 @@ export async function installFromMarketplace(
   githubToken?: string,
 ): Promise<Plugin> {
   return installEntry(createCtx(githubToken || undefined), marketplace, entry);
+}
+
+/**
+ * The settings to keep when an installed plugin is reinstalled or updated to `next`: values the
+ * user set (not the old version's defaults) for keys `next` still declares. A value whose key became
+ * sensitive moves to the device-only secrets; old secrets stay only for keys that are still sensitive.
+ */
+export function carryOverSettings(old: Plugin, next: Plugin): Pick<Plugin, 'config' | 'secrets'> {
+  const config = { ...next.config };
+  const secrets: Record<string, string> = { ...next.secrets };
+  const text = (v: string | number | boolean | string[]) => (Array.isArray(v) ? v.join(',') : String(v));
+  for (const f of next.userConfig) {
+    const before = old.userConfig.find((o) => o.key === f.key);
+    const value = old.config[f.key] as string | number | boolean | undefined;
+    const userSet = value !== undefined && (before?.default === undefined || text(value) !== text(before.default));
+    if (!f.sensitive) {
+      if (userSet) config[f.key] = value;
+    } else if (old.secrets?.[f.key]) {
+      secrets[f.key] = old.secrets[f.key];
+    } else if (userSet && text(value) !== '') {
+      secrets[f.key] = text(value);
+    }
+  }
+  return { config, secrets };
 }

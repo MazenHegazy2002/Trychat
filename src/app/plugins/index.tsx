@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel } from '../../components/ui';
 import type { IconName } from '../../components/ui';
-import { inspectGithubSource, installFromMarketplace } from '../../lib/pluginInstaller';
+import { carryOverSettings, inspectGithubSource, installFromMarketplace } from '../../lib/pluginInstaller';
 import type { MarketplaceEntry, MarketplaceInfo } from '../../lib/pluginInstaller';
 import { missingConfig } from '../../lib/plugins';
 import { useStore } from '../../lib/store';
@@ -36,7 +36,7 @@ const openPlugin = (id: string) => router.push({ pathname: '/plugins/[id]', para
 /** A freshly fetched plugin as it will look once installed (reinstalls keep the user's settings). */
 function withSavedSettings(plugin: Plugin, installed: Plugin[]): Plugin {
   const old = installed.find((p) => p.id === plugin.id);
-  return old ? { ...plugin, config: { ...plugin.config, ...old.config }, secrets: old.secrets } : plugin;
+  return old ? { ...plugin, ...carryOverSettings(old, plugin) } : plugin;
 }
 
 export default function PluginsScreen() {

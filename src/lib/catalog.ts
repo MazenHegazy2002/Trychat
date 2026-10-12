@@ -167,7 +167,7 @@ export function remoteFields(remote: RegistryRemote): RemoteField[] {
   };
   for (const key of placeholders(remote.url)) {
     const v = remote.variables.find((x) => x.name === key);
-    add({ key, label: key, description: v?.description, secret: !!v?.isSecret, required: v?.isRequired ?? true, defaultValue: v?.default, choices: v?.choices });
+    add({ key, label: key, description: v?.description, secret: v?.isSecret ?? /key|token|secret|auth/i.test(key), required: v?.isRequired ?? true, defaultValue: v?.default, choices: v?.choices });
   }
   for (const h of remote.headers) {
     const keys = h.value ? placeholders(h.value) : [];
@@ -186,14 +186,28 @@ export function remoteFields(remote: RegistryRemote): RemoteField[] {
 const fill = (template: string, values: Record<string, string>) =>
   template.replace(/\{([A-Za-z0-9_.-]+)\}/g, (m, key) => values[key] ?? m);
 
-/** Builds the URL and headers for a remote from the user's answers. Empty optional headers are left out. */
-export function buildRemote(remote: RegistryRemote, values: Record<string, string>): { url: string; headers: Record<string, string> } {
+/**
+ * Builds the URL and headers for a remote from the user's answers. Empty optional headers are left out.
+ * `url` syncs, so secret URL variables stay in it as {name} and go to `urlSecrets` (device-only),
+ * which the MCP client fills back in when it connects.
+ */
+export function buildRemote(
+  remote: RegistryRemote,
+  values: Record<string, string>,
+): { url: string; headers: Record<string, string>; urlSecrets: Record<string, string> } {
   const headers: Record<string, string> = {};
   for (const h of remote.headers) {
     const v = h.value ? fill(h.value, values) : values[`header:${h.name}`];
     if (v && !/\{[A-Za-z0-9_.-]+\}/.test(v)) headers[h.name] = v;
   }
-  return { url: fill(remote.url, values), headers };
+  const secret = new Set(remoteFields(remote).filter((f) => f.secret).map((f) => f.key));
+  const urlSecrets: Record<string, string> = {};
+  const url = remote.url.replace(/\{([A-Za-z0-9_.-]+)\}/g, (m, key: string) => {
+    if (!secret.has(key)) return values[key] ?? m;
+    if (values[key] !== undefined) urlSecrets[key] = values[key];
+    return m;
+  });
+  return { url, headers, urlSecrets };
 }
 
 /** "com.notion/mcp" → "Notion"; prefers the registry title. */

@@ -6,6 +6,7 @@ import { runSubAgents } from './agents';
 import { deleteAttachmentFiles, messageContent } from './attachments';
 import { chat } from './api';
 import { uid } from './id';
+import { carryOverSettings } from './pluginInstaller';
 import { buildApiMessages, extractMemoryOps, stripMemoryTags } from './prompt';
 import * as storage from './storage';
 import { listMcpTools } from './mcp';
@@ -230,7 +231,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Discover MCP tools whenever the server list (including plugin servers) changes.
   const pluginServers = pluginMcpServers(plugins);
   const mcpKey = [...mcpServers, ...pluginServers]
-    .map((x) => `${x.id}:${x.url}:${x.enabled}:${x.token ?? ''}:${JSON.stringify(x.headers ?? {})}`)
+    .map((x) => `${x.id}:${x.url}:${x.enabled}:${x.token ?? ''}:${JSON.stringify(x.headers ?? {})}:${JSON.stringify(x.urlSecrets ?? {})}`)
     .join('|');
   useEffect(() => {
     if (ready) refreshMcpTools();
@@ -291,7 +292,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         sync.mergeList(list, items, 'plugins', (p) => p.updatedAt, (data, local) => ({ ...data, secrets: local?.secrets })),
       );
       setMcpServers((list) =>
-        sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, (data, local) => ({ ...data, token: local?.token, headers: local?.headers })),
+        sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, (data, local) => ({ ...data, token: local?.token, headers: local?.headers, urlSecrets: local?.urlSecrets })),
       );
       const merged = sync.mergePrefs(settingsRef.current, items);
       if (merged !== settingsRef.current) {
@@ -393,8 +394,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ? {
             ...plugin,
             enabled: old.enabled,
-            config: { ...plugin.config, ...old.config },
-            secrets: old.secrets,
+            ...carryOverSettings(old, plugin),
             installedAt: old.installedAt,
             updatedAt: now,
           }

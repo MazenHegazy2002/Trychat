@@ -90,6 +90,8 @@ export interface McpServer {
   token?: string;
   /** Extra HTTP headers (used by plugin-provided servers). */
   headers?: Record<string, string>;
+  /** Secret values for {name} placeholders left in `url` (e.g. an API key); kept on this device only. */
+  urlSecrets?: Record<string, string>;
   enabled: boolean;
   /** Ask before every tool call on this server. */
   confirm: boolean;

@@ -59,8 +59,8 @@ export function localItems(state: SyncState): SyncItem[] {
     ...state.projects.map((p) => ({ collection: 'projects' as const, id: p.id, updatedAt: p.updatedAt, data: p })),
     // Plugin secrets (sensitive settings) stay on the device.
     ...state.plugins.map(({ secrets: _secrets, ...p }) => ({ collection: 'plugins' as const, id: p.id, updatedAt: p.updatedAt, data: p })),
-    // Tokens and headers (API keys) stay on the device.
-    ...state.mcpServers.map(({ token: _secret, headers: _headers, ...s }) => ({
+    // Tokens, headers and secret URL values (API keys) stay on the device.
+    ...state.mcpServers.map(({ token: _secret, headers: _headers, urlSecrets: _urlSecrets, ...s }) => ({
       collection: 'mcpServers' as const,
       id: s.id,
       updatedAt: s.updatedAt,

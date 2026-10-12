@@ -10,8 +10,8 @@ const USER_CONFIG_RE = /\$\{user_config\.([A-Za-z_][A-Za-z0-9_]*)\}/g;
 /** Value of a userConfig field: saved value, else the field's default. */
 function configValue(plugin: Plugin, key: string, includeSensitive: boolean): string | undefined {
   const field = plugin.userConfig.find((f) => f.key === key);
-  if (field?.sensitive) return includeSensitive ? plugin.secrets?.[key] : undefined;
-  const v = plugin.config[key] ?? field?.default;
+  if (field?.sensitive && !includeSensitive) return undefined;
+  const v = (field?.sensitive ? plugin.secrets?.[key] : plugin.config[key]) ?? field?.default;
   if (v === undefined || v === null) return undefined;
   return Array.isArray(v) ? v.join(',') : String(v);
 }
@@ -25,6 +25,7 @@ export function substituteConfig(text: string, plugin: Plugin, includeSensitive 
     const v = configValue(plugin, key, includeSensitive);
     if (v !== undefined) return v;
     const field = plugin.userConfig.find((f) => f.key === key);
+    if (includeSensitive && field && !field.required) return ''; // an optional value left unset, like ${VAR:-}
     return field?.sensitive && !includeSensitive ? `[${key} (hidden)]` : `[${key} not set]`;
   });
 }

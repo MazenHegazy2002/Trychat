@@ -30,9 +30,15 @@ function parseSse(text: string): any[] {
     .filter(Boolean);
 }
 
+/** The URL to call: `url` with its secret {name} placeholders filled in from urlSecrets. */
+function requestUrl(server: McpServer): string {
+  const secrets = server.urlSecrets;
+  return secrets ? server.url.replace(/\{([A-Za-z0-9_.-]+)\}/g, (m, key: string) => secrets[key] ?? m) : server.url;
+}
+
 async function post(server: McpServer, payload: object): Promise<{ status: number; messages: any[]; session?: string }> {
   const session = sessions.get(server.id);
-  const res = await fetch(server.url, {
+  const res = await fetch(requestUrl(server), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

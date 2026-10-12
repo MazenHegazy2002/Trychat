@@ -106,6 +106,7 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
     const config = { ...plugin.config };
     const secrets = { ...(plugin.secrets ?? {}) };
     for (const f of plugin.userConfig) {
+      if (draft[f.key] === saved[f.key]) continue; // unchanged: an unset field keeps following its default
       const v = draft[f.key];
       if (f.type === 'boolean' && !f.sensitive) {
         config[f.key] = v === true;
@@ -220,7 +221,9 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
                     ? 'File path'
                     : f.multiple
                       ? 'Separate values with commas'
-                      : ''
+                      : f.sensitive && f.default !== undefined
+                        ? `Default: ${f.default}`
+                        : ''
             }
             placeholderTextColor={theme.faint}
             keyboardType={f.type === 'number' ? 'numeric' : 'default'}

@@ -419,12 +419,13 @@ function McpTab() {
   const add = (s: RegistryServer, values: Record<string, string> = {}) => {
     const remote = bestRemote(s);
     if (!remote) return;
-    const { url, headers } = buildRemote(remote, values);
+    const { url, headers, urlSecrets } = buildRemote(remote, values);
     saveMcpServer({
       id: uid(),
       name: displayName(s),
       url,
       headers: Object.keys(headers).length ? headers : undefined,
+      urlSecrets: Object.keys(urlSecrets).length ? urlSecrets : undefined,
       enabled: true,
       confirm: true,
       updatedAt: 0, // saveMcpServer stamps the real time
