@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: android-apk-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false # queue new builds instead of killing one in progress
 
 jobs:
   build:
