@@ -5,6 +5,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel, TextAction } from '../components/ui';
 import { uid } from '../lib/id';
+import { mcpTransport } from '../lib/mcp';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { McpServer } from '../lib/types';
@@ -129,6 +130,17 @@ export default function McpScreen() {
             keyboardType="url"
             style={[input, { fontFamily: 'monospace', fontSize: 14 }]}
           />
+          <View style={[styles.askRow, { paddingHorizontal: 0, gap: 12 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.text, fontSize: 14 }}>Legacy SSE transport</Text>
+              <Text style={{ color: theme.faint, fontSize: 12, marginTop: 2 }}>For older servers, usually at a URL ending in /sse</Text>
+            </View>
+            <ClaySwitch
+              value={mcpTransport(draft) === 'sse'}
+              onValueChange={(v) => setDraft({ ...draft, transport: v ? 'sse' : 'http' })}
+              label="Legacy SSE transport"
+            />
+          </View>
           <Text style={[styles.label, { color: theme.muted }]}>Access token (optional)</Text>
           <TextInput
             value={draft.token}

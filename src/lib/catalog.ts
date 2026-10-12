@@ -140,6 +140,9 @@ export function bestRemote(server: RegistryServer): RegistryRemote | undefined {
   return server.remotes.find((r) => r.type === 'streamable-http') ?? server.remotes.find((r) => r.type === 'sse');
 }
 
+/** The McpServer transport for a remote: "sse" is the legacy HTTP+SSE transport. */
+export const remoteTransport = (remote: RegistryRemote): 'http' | 'sse' => (remote.type === 'sse' ? 'sse' : 'http');
+
 /** Placeholders like {api_key} inside a header template or URL. */
 export function placeholders(template: string): string[] {
   return [...new Set([...template.matchAll(/\{([A-Za-z0-9_.-]+)\}/g)].map((m) => m[1]))];

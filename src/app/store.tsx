@@ -12,6 +12,7 @@ import {
   buildRemote,
   displayName,
   remoteFields,
+  remoteTransport,
   searchRegistry,
 } from '../lib/catalog';
 import type { CatalogSource, RegistryServer, RemoteField } from '../lib/catalog';
@@ -443,6 +444,7 @@ function McpTab() {
       id: uid(),
       name: displayName(s),
       url,
+      transport: remoteTransport(remote),
       headers: Object.keys(headers).length ? headers : undefined,
       urlSecrets: Object.keys(urlSecrets).length ? urlSecrets : undefined,
       enabled: true,

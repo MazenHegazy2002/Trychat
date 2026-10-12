@@ -97,6 +97,7 @@ export function pluginMcpServers(plugins: Plugin[]): McpServer[] {
       id: `plugin:${p.id}:mcp:${m.name}`,
       name: `${prefix}-${m.name}`,
       url: substituteConfig(m.url, p, true),
+      transport: m.transport,
       headers: m.headers
         ? Object.fromEntries(Object.entries(m.headers).map(([k, v]) => [k, substituteConfig(v, p, true)]))
         : undefined,

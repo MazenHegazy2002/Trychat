@@ -231,7 +231,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Discover MCP tools whenever the server list (including plugin servers) changes.
   const pluginServers = pluginMcpServers(plugins);
   const mcpKey = [...mcpServers, ...pluginServers]
-    .map((x) => `${x.id}:${x.url}:${x.enabled}:${x.token ?? ''}:${JSON.stringify(x.headers ?? {})}:${JSON.stringify(x.urlSecrets ?? {})}`)
+    .map((x) => `${x.id}:${x.url}:${x.transport ?? ''}:${x.enabled}:${x.token ?? ''}:${JSON.stringify(x.headers ?? {})}:${JSON.stringify(x.urlSecrets ?? {})}`)
     .join('|');
   useEffect(() => {
     if (ready) refreshMcpTools();

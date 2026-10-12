@@ -81,11 +81,13 @@ export interface Skill {
   updatedAt: number;
 }
 
-/** A remote MCP server (Streamable HTTP transport). */
+/** A remote MCP server (Streamable HTTP or legacy HTTP+SSE transport). */
 export interface McpServer {
   id: string;
   name: string;
   url: string;
+  /** "sse" is the legacy HTTP+SSE transport. Unset: SSE when the URL path ends in /sse, else HTTP. */
+  transport?: 'http' | 'sse';
   /** Sent as `Authorization: Bearer <token>`; kept on this device only. */
   token?: string;
   /** Extra HTTP headers (used by plugin-provided servers). */
