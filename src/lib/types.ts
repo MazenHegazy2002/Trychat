@@ -40,7 +40,22 @@ export interface Conversation {
   id: string;
   title: string;
   model: string;
+  /** The project (folder) this chat belongs to. */
+  projectId?: string;
   messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A folder of chats with shared instructions and reference files (like Claude Projects). */
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  /** Added to the system prompt of every chat in the project. */
+  instructions: string;
+  /** Reference files; their text is shared with every chat in the project. */
+  files: Attachment[];
   createdAt: number;
   updatedAt: number;
 }

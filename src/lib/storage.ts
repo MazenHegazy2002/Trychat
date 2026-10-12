@@ -2,13 +2,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-import type { Account, Conversation, McpServer, Memory, Settings, Skill } from './types';
+import type { Account, Conversation, McpServer, Memory, Project, Settings, Skill } from './types';
 
 const KEYS = {
   settings: 'trychat.settings',
   conversations: 'trychat.conversations',
   memories: 'trychat.memories',
   skills: 'trychat.skills',
+  projects: 'trychat.projects',
   mcpServers: 'trychat.mcpServers',
   account: 'trychat.account',
   syncSnapshot: 'trychat.syncSnapshot',
@@ -88,6 +89,9 @@ export const saveConversations = (c: Conversation[]) => writeJson(KEYS.conversat
 
 export const loadMemories = () => readJson<Memory[]>(KEYS.memories, []);
 export const saveMemories = (m: Memory[]) => writeJson(KEYS.memories, m);
+
+export const loadProjects = () => readJson<Project[]>(KEYS.projects, []);
+export const saveProjects = (p: Project[]) => writeJson(KEYS.projects, p);
 
 export const loadSkills = () => readJson<Skill[]>(KEYS.skills, []);
 export const saveSkills = (s: Skill[]) => writeJson(KEYS.skills, s);

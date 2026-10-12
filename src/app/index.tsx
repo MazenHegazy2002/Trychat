@@ -3,7 +3,9 @@ import { useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { MoveToProjectSheet } from '../components/MoveToProjectSheet';
 import { TextPrompt } from '../components/TextPrompt';
+import { Icon } from '../components/ui';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 
@@ -19,8 +21,10 @@ function timeAgo(ts: number): string {
 export default function ConversationsScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { conversations, settings, memories, createConversation, deleteConversation, renameConversation } =
+  const { conversations, projects, settings, memories, createConversation, deleteConversation, renameConversation } =
     useStore();
+  const [moving, setMoving] = useState<string | null>(null);
+  const projectName = (id?: string) => projects.find((p) => p.id === id)?.name;
   const [query, setQuery] = useState('');
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
 
@@ -37,11 +41,17 @@ export default function ConversationsScreen() {
   };
 
   const onLongPress = (id: string, title: string) => {
-    Alert.alert(title, undefined, [
-      { text: 'Rename', onPress: () => setRenaming({ id, title }) },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteConversation(id) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    // Android shows at most three buttons, so dismissing (tap outside / back) is the cancel.
+    Alert.alert(
+      title,
+      undefined,
+      [
+        { text: 'Rename', onPress: () => setRenaming({ id, title }) },
+        { text: 'Move to project', onPress: () => setMoving(id) },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteConversation(id) },
+      ],
+      { cancelable: true },
+    );
   };
 
   return (
@@ -85,6 +95,24 @@ export default function ConversationsScreen() {
         data={list}
         keyExtractor={(c) => c.id}
         contentContainerStyle={{ paddingBottom: 100 }}
+        ListHeaderComponent={
+          query ? null : (
+            <Pressable
+              onPress={() => router.push('/projects')}
+              style={({ pressed }) => [styles.navRow, { backgroundColor: pressed ? theme.surface2 : 'transparent' }]}
+              accessibilityRole="button"
+            >
+              <Icon name="folder" size={18} color={theme.text} />
+              <Text style={{ color: theme.text, fontSize: 15, flex: 1 }}>Projects</Text>
+              {projects.length > 0 && (
+                <View style={[styles.count, { backgroundColor: theme.oat }]}>
+                  <Text style={{ color: theme.text, fontSize: 12, fontWeight: '600' }}>{projects.length}</Text>
+                </View>
+              )}
+              <Icon name="chevron-right" size={16} />
+            </Pressable>
+          )
+        }
         ListEmptyComponent={
           <Text style={{ color: theme.muted, textAlign: 'center', marginTop: 48, fontSize: 15 }}>
             {query ? 'No matching chats.' : 'No chats yet. Start one below.'}
@@ -110,6 +138,12 @@ export default function ConversationsScreen() {
               <Text style={{ color: theme.muted, marginTop: 3 }} numberOfLines={1}>
                 {last ? last.content.replace(/\s+/g, ' ') : 'Empty chat'}
               </Text>
+              {!!projectName(item.projectId) && (
+                <View style={styles.projectTag}>
+                  <Icon name="folder" size={12} color={theme.faint} />
+                  <Text style={{ color: theme.faint, fontSize: 12 }}>in {projectName(item.projectId)}</Text>
+                </View>
+              )}
             </Pressable>
           );
         }}
@@ -122,6 +156,8 @@ export default function ConversationsScreen() {
         onSubmit={(t) => renaming && renameConversation(renaming.id, t)}
         onClose={() => setRenaming(null)}
       />
+
+      <MoveToProjectSheet conversationId={moving} onClose={() => setMoving(null)} />
 
       <Pressable
         onPress={newChat}
@@ -138,6 +174,9 @@ const styles = StyleSheet.create({
   search: { margin: 16, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
   row: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { fontSize: 16, fontWeight: '600', flex: 1, marginRight: 8 },
+  navRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 52 },
+  count: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  projectTag: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   fab: {
     position: 'absolute',
     right: 20,

@@ -3,7 +3,7 @@
 //
 //   node server/trychat-server.mjs --port=8787 --data=./trychat-data
 //
-// Accounts sign in with email + password. Each account's memories, chats, skills,
+// Accounts sign in with email + password. Each account's memories, chats, projects, skills,
 // MCP server list and preferences are stored here, so every device signed in to the
 // same account sees the same data. Secrets (API keys, tokens) never leave the phone.
 //
@@ -28,7 +28,7 @@ const PORT = Number(args.port ?? process.env.PORT ?? 8787);
 const DATA_DIR = path.resolve(args.data ?? process.env.TRYCHAT_DATA ?? './trychat-data');
 const ALLOW_SIGNUP = (args.signup ?? process.env.TRYCHAT_ALLOW_SIGNUP ?? 'true') !== 'false';
 const MAX_BODY = 20 * 1024 * 1024;
-const COLLECTIONS = new Set(['memories', 'conversations', 'skills', 'mcpServers', 'prefs']);
+const COLLECTIONS = new Set(['memories', 'conversations', 'skills', 'mcpServers', 'projects', 'prefs']);
 
 // ---------- Tiny JSON file store (one file per account + an index) ----------
 

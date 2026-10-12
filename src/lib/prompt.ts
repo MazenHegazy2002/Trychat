@@ -1,7 +1,7 @@
 import type { ApiContentPart, ApiMessage } from './api';
 import { formatToolCall, toolInstructions } from './tools';
 import type { ToolContext } from './tools';
-import type { ChatMessage, Memory } from './types';
+import type { ChatMessage, Memory, Project } from './types';
 
 const MEMORY_INSTRUCTIONS = `You have a long-term memory that persists across all conversations with this user.
 When the user tells you something worth remembering long-term (their name, preferences, goals, projects, facts about them),
@@ -15,9 +15,31 @@ When building something that runs in a browser, return ONE complete, self-contai
 (inline CSS and JavaScript, CDN libraries allowed) in a single \`\`\`html code block, so the user can tap "Preview" to run it on their phone.
 Make UIs mobile-friendly. For other languages, return complete, runnable code with brief instructions.`;
 
-export function buildSystemPrompt(ctx: ToolContext, memories: Memory[]): string {
+/** Max characters of project files put into the prompt (keeps requests within model limits). */
+const MAX_PROJECT_FILE_CHARS = 60_000;
+
+function projectSection(project: Project): string {
+  const lines = [`This chat is part of the user's project "${project.name}".`];
+  if (project.description.trim()) lines.push(`About the project: ${project.description.trim()}`);
+  if (project.instructions.trim()) lines.push(`Project instructions (follow these):\n${project.instructions.trim()}`);
+  let budget = MAX_PROJECT_FILE_CHARS;
+  const files = project.files.filter((f) => f.text);
+  if (files.length) {
+    lines.push('Project files (reference material the user added):');
+    for (const f of files) {
+      const text = f.text!.slice(0, Math.max(0, budget));
+      budget -= text.length;
+      lines.push(`--- ${f.name} ---\n${text}${text.length < f.text!.length ? '\n…[truncated]' : ''}`);
+      if (budget <= 0) break;
+    }
+  }
+  return lines.join('\n\n');
+}
+
+export function buildSystemPrompt(ctx: ToolContext, memories: Memory[], project?: Project): string {
   const settings = ctx.settings;
   const parts = [settings.systemPrompt.trim()];
+  if (project) parts.push(projectSection(project));
   if (settings.builderMode) parts.push(BUILDER_INSTRUCTIONS);
   if (settings.memoryEnabled) {
     parts.push(MEMORY_INSTRUCTIONS);
@@ -39,13 +61,14 @@ export function buildApiMessages(
   history: ChatMessage[],
   /** Content for messages with attachments (text + images), keyed by message id. */
   attachmentContent: Map<string, string | ApiContentPart[]> = new Map(),
+  project?: Project,
 ): ApiMessage[] {
   const settings = ctx.settings;
   const recent = history
     .filter((m) => !m.error && (m.content.trim() || m.toolCall || m.attachments?.length))
     .slice(-Math.max(1, settings.contextMessages));
   return [
-    { role: 'system', content: buildSystemPrompt(ctx, memories) },
+    { role: 'system', content: buildSystemPrompt(ctx, memories, project) },
     ...recent.map((m) => ({
       role: m.role,
       content: m.toolCall

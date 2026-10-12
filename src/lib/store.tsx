@@ -12,7 +12,7 @@ import { listMcpTools } from './mcp';
 import * as sync from './sync';
 import { formatToolResult, needsApproval, parseToolCall, runTool, stripToolTags } from './tools';
 import type { ToolContext } from './tools';
-import type { Account, Attachment, ChatMessage, Conversation, McpServer, McpTool, Memory, Settings, Skill } from './types';
+import type { Account, Attachment, ChatMessage, Conversation, McpServer, McpTool, Memory, Project, Settings, Skill } from './types';
 
 export type SyncStatus = { state: 'idle' | 'syncing' | 'error'; error?: string };
 
@@ -22,6 +22,7 @@ interface Store {
   conversations: Conversation[];
   memories: Memory[];
   skills: Skill[];
+  projects: Project[];
   mcpServers: McpServer[];
   /** Tools discovered on each MCP server (by server id) and connection errors. */
   mcpTools: Record<string, McpTool[]>;
@@ -39,7 +40,12 @@ interface Store {
   signOut: () => Promise<void>;
   syncNow: () => Promise<void>;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
-  createConversation: () => Conversation;
+  createConversation: (projectId?: string) => Conversation;
+  /** Creates or updates a project. */
+  saveProject: (project: Project) => void;
+  /** Deletes a project; its chats move out of it (they are kept). */
+  deleteProject: (id: string) => void;
+  moveConversation: (conversationId: string, projectId: string | undefined) => void;
   deleteConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
   setConversationModel: (id: string, model: string) => void;
@@ -90,6 +96,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpTools, setMcpTools] = useState<Record<string, McpTool[]>>({});
   const [mcpErrors, setMcpErrors] = useState<Record<string, string>>({});
@@ -102,6 +109,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const settingsRef = useRef(settings);
   const controllers = useRef<Record<string, AbortController>>({});
   const skillsRef = useRef(skills);
+  const projectsRef = useRef(projects);
   const mcpRef = useRef(mcpServers);
   const mcpToolsRef = useRef(mcpTools);
   const accountRef = useRef(account);
@@ -110,6 +118,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   memRef.current = memories;
   settingsRef.current = settings;
   skillsRef.current = skills;
+  projectsRef.current = projects;
   mcpRef.current = mcpServers;
   mcpToolsRef.current = mcpTools;
   accountRef.current = account;
@@ -123,7 +132,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       storage.loadSkills(),
       storage.loadMcpServers(),
       storage.loadAccount(),
-    ]).then(([s, c, m, k, servers, acct]) => {
+      storage.loadProjects(),
+    ]).then(([s, c, m, k, servers, acct, p]) => {
+      setProjects(p);
       setSettings(s);
       setConversations(c);
       setMemories(m);
@@ -159,6 +170,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (ready) storage.saveSkills(skills);
   }, [skills, ready]);
+
+  useEffect(() => {
+    if (ready) storage.saveProjects(projects);
+  }, [projects, ready]);
 
   useEffect(() => {
     if (ready) storage.saveMcpServers(mcpServers);
@@ -224,6 +239,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         conversations: convRef.current.filter((c) => !busyRef.current[c.id]), // don't upload half-streamed replies
         skills: skillsRef.current,
         mcpServers: mcpRef.current,
+        projects: projectsRef.current,
         settings: settingsRef.current,
       };
       const busyKeys = new Set(Object.keys(busyRef.current).map((id) => `conversations/${id}`));
@@ -236,6 +252,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return merged === list ? list : merged.sort((x, y) => y.updatedAt - x.updatedAt); // same array = no re-sync
       });
       setSkills((list) => sync.mergeList(list, items, 'skills', (k) => k.updatedAt));
+      setProjects((list) => sync.mergeList(list, items, 'projects', (p) => p.updatedAt));
       setMcpServers((list) =>
         sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, (data, local) => ({ ...data, token: local?.token })),
       );
@@ -290,7 +307,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const t = setTimeout(syncNow, 2500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, account?.token, memories, conversations, skills, mcpServers, settings, busy]);
+  }, [ready, account?.token, memories, conversations, skills, projects, mcpServers, settings, busy]);
 
   const accountToken = account?.token;
   useEffect(() => {
@@ -314,12 +331,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await storage.saveSettings(next);
   }, []);
 
-  const createConversation = useCallback(() => {
+  const createConversation = useCallback((projectId?: string) => {
     const now = Date.now();
     const conv: Conversation = {
       id: uid(),
       title: 'New chat',
       model: settingsRef.current.model,
+      ...(projectId ? { projectId } : {}),
       messages: [],
       createdAt: now,
       updatedAt: now,
@@ -327,6 +345,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setConversations((list) => [conv, ...list]);
     return conv;
   }, []);
+
+  const saveProject = useCallback((project: Project) => {
+    const next = { ...project, updatedAt: Date.now() };
+    setProjects((list) => (list.some((p) => p.id === project.id) ? list.map((p) => (p.id === project.id ? next : p)) : [next, ...list]));
+  }, []);
+
+  const deleteProject = useCallback((id: string) => {
+    deleteAttachmentFiles(projectsRef.current.find((p) => p.id === id)?.files);
+    setProjects((list) => list.filter((p) => p.id !== id));
+    const now = Date.now();
+    setConversations((list) =>
+      list.map((c) => (c.projectId === id ? { ...c, projectId: undefined, updatedAt: now } : c)),
+    );
+  }, []);
+
+  const moveConversation = useCallback(
+    (conversationId: string, projectId: string | undefined) =>
+      patchConversation(conversationId, (c) => ({ ...c, projectId, updatedAt: Date.now() })),
+    [patchConversation],
+  );
 
   const deleteConversation = useCallback((id: string) => {
     controllers.current[id]?.abort();
@@ -413,7 +451,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         raw = await chat({
           settings: s,
           model,
-          messages: buildApiMessages(toolCtx(model), memRef.current, history, await messageContent(history)),
+          messages: buildApiMessages(
+            toolCtx(model),
+            memRef.current,
+            history,
+            await messageContent(history),
+            projectsRef.current.find((p) => p.id === conv?.projectId),
+          ),
           signal: controller.signal,
           onText: (text) => {
             raw = text;
@@ -568,6 +612,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         conversations,
         memories,
         skills,
+        projects,
         mcpServers,
         mcpTools,
         mcpErrors,
@@ -584,6 +629,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         syncNow,
         updateSettings,
         createConversation,
+        saveProject,
+        deleteProject,
+        moveConversation,
         deleteConversation,
         renameConversation,
         setConversationModel,

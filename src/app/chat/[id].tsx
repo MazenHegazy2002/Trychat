@@ -21,6 +21,7 @@ import { Icon } from '../../components/ui';
 import { pickFiles, pickImages, takePhoto } from '../../lib/attachments';
 import { Markdown } from '../../components/Markdown';
 import { ModelPicker } from '../../components/ModelPicker';
+import { MoveToProjectSheet } from '../../components/MoveToProjectSheet';
 import { ToolCallCard } from '../../components/ToolCallCard';
 import { TextPrompt } from '../../components/TextPrompt';
 import { useStore } from '../../lib/store';
@@ -56,6 +57,7 @@ export default function ChatScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [pending, setPending] = useState<Attachment[]>([]);
   const [attaching, setAttaching] = useState(false);
   const keyboardVisible = useKeyboardState((k) => k.isVisible);
@@ -69,6 +71,7 @@ export default function ChatScreen() {
   }
 
   const model = conv.model || store.settings.model;
+  const project = store.projects.find((p) => p.id === conv.projectId);
   const lastAssistantId = [...conv.messages].reverse().find((m) => m.role === 'assistant')?.id;
 
   const canSend = !!input.trim() || pending.length > 0;
@@ -163,13 +166,17 @@ export default function ChatScreen() {
                 {conv.title}
               </Text>
               <Text numberOfLines={1} style={{ color: theme.muted, fontSize: 11 }}>
-                {model || 'no model'}
+                {project ? project.name : model || 'no model'}
               </Text>
             </Pressable>
           ),
           headerRight: () => (
-            <Pressable onPress={() => setPickerOpen(true)} hitSlop={8}>
-              <Text style={{ color: theme.primary, fontSize: 15, fontWeight: '600' }}>Model</Text>
+            <Pressable
+              onPress={() => setMoving(true)}
+              style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+              accessibilityLabel={project ? `In project ${project.name}. Move to another project` : 'Move to project'}
+            >
+              <Icon name="folder" size={20} color={project ? theme.primary : theme.text} />
             </Pressable>
           ),
         }}
@@ -270,6 +277,7 @@ export default function ChatScreen() {
       </View>
 
       <AttachSheet visible={attachOpen} onClose={() => setAttachOpen(false)} onPick={attach} />
+      <MoveToProjectSheet conversationId={moving ? id : null} onClose={() => setMoving(false)} />
       <ModelPicker
         visible={pickerOpen}
         selected={model}

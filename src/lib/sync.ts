@@ -1,4 +1,4 @@
-import type { Account, Conversation, McpServer, Memory, Settings, Skill } from './types';
+import type { Account, Conversation, McpServer, Memory, Project, Settings, Skill } from './types';
 
 /**
  * Cross-device sync with the TryChat server (server/trychat-server.mjs).
@@ -11,10 +11,11 @@ export interface SyncState {
   conversations: Conversation[];
   skills: Skill[];
   mcpServers: McpServer[];
+  projects: Project[];
   settings: Settings;
 }
 
-export type Collection = 'memories' | 'conversations' | 'skills' | 'mcpServers' | 'prefs';
+export type Collection = 'memories' | 'conversations' | 'skills' | 'mcpServers' | 'projects' | 'prefs';
 
 export interface SyncItem {
   collection: Collection;
@@ -51,6 +52,7 @@ export function localItems(state: SyncState): SyncItem[] {
     ...state.memories.map((m) => ({ collection: 'memories' as const, id: m.id, updatedAt: m.updatedAt ?? m.createdAt, data: m })),
     ...state.conversations.map((c) => ({ collection: 'conversations' as const, id: c.id, updatedAt: c.updatedAt, data: c })),
     ...state.skills.map((s) => ({ collection: 'skills' as const, id: s.id, updatedAt: s.updatedAt, data: s })),
+    ...state.projects.map((p) => ({ collection: 'projects' as const, id: p.id, updatedAt: p.updatedAt, data: p })),
     ...state.mcpServers.map(({ token: _secret, ...s }) => ({
       collection: 'mcpServers' as const,
       id: s.id,

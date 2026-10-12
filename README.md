@@ -17,6 +17,8 @@ OpenAI-compatible server — preconfigured for `http://169.58.133.158:20128/v1`.
 - **Sub-agents** — the model can send up to 5 helper agents to work in parallel (research, comparisons, splitting big jobs). They can read and run code but can't run commands or make changes.
 - **Run code in the app** — JavaScript and Python (Pyodide, with numpy/pandas) run on the phone; the model uses `code.run` to calculate and test.
 - **Preview everything** — HTML, React/JSX/TSX, JavaScript, Python, Markdown, Mermaid diagrams and SVG open in an in-app preview.
+- **Projects (folders)** — group chats into projects with their own instructions and reference files that every chat in the project uses. Long-press a chat (or tap the folder icon in a chat) to move it.
+- **Attachments** — attach photos, take a picture, or add text/code files from the + button.
 - **Skills** — reusable instruction packs (write your own, add starters, or import a `SKILL.md` from GitHub). The model loads one when a task matches.
 - **MCP servers** — connect remote MCP servers (Streamable HTTP) and their tools become available in chat.
 - **Pinned repos** — tell TryChat which GitHub repos are "yours".
