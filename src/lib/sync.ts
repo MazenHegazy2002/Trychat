@@ -17,6 +17,8 @@ export interface SyncState {
 }
 
 export type Collection = 'memories' | 'conversations' | 'skills' | 'mcpServers' | 'projects' | 'plugins' | 'prefs';
+/** Sent with every sync so the server only sends (and accepts) what this build can store. */
+export const COLLECTIONS: Collection[] = ['memories', 'conversations', 'skills', 'mcpServers', 'projects', 'plugins', 'prefs'];
 
 export interface SyncItem {
   collection: Collection;
@@ -155,5 +157,5 @@ export async function pushPull(
   account: Account,
   changes: SyncItem[],
 ): Promise<{ cursor: number; items: SyncItem[] }> {
-  return request(account.serverUrl, '/sync', { since: account.cursor, changes }, account.token);
+  return request(account.serverUrl, '/sync', { since: account.cursor, collections: COLLECTIONS, changes }, account.token);
 }

@@ -282,7 +282,9 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
       kind: 'agent',
       description:
         'Send up to 5 sub-agents to work in parallel. Each gets one self-contained task (include all context it needs), can use the read-only tools and code.run, and returns its answer. Use for research, comparing options, or splitting big jobs.',
-      params: '{"tasks":[{"task":"...","agent":"optional agent name","model":"optional model id"}]}',
+      params: ctx.agentProfiles?.length
+        ? '{"tasks":[{"task":"...","agent":"optional agent name","model":"optional model id"}]}'
+        : '{"tasks":[{"task":"...","model":"optional model id"}]}',
       label: (a) => {
         const n = Array.isArray(a.tasks) ? a.tasks.length : 0;
         return `Sent ${n} sub-agent${n === 1 ? '' : 's'}`;
@@ -293,12 +295,13 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
           .filter((t: any) => t?.task)
           .slice(0, 5);
         if (!tasks.length) throw new Error('Give at least one task: {"tasks":[{"task":"..."}]}');
+        // An agent name that isn't installed runs as a general sub-agent rather than failing the batch.
         const known = new Set((ctx.agentProfiles ?? []).map((p) => p.name));
-        const unknown = tasks.map((t: any) => t.agent).filter((n: any) => n && !known.has(n));
-        if (unknown.length) {
-          throw new Error(`Unknown agent ${unknown.join(', ')}. Available: ${[...known].join(', ') || 'none'}`);
-        }
-        return runSubAgents(tasks);
+        const unknown = [...new Set(tasks.map((t: any) => t.agent).filter((n: any) => n && !known.has(n)))];
+        const result = await runSubAgents(tasks.map((t: any) => (t.agent && !known.has(t.agent) ? { ...t, agent: undefined } : t)));
+        return unknown.length
+          ? `${result}\n\n(No agent named ${unknown.join(', ')}; ran as general sub-agents. Available: ${[...known].join(', ') || 'none'}.)`
+          : result;
       },
     };
   }

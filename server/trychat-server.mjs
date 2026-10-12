@@ -29,6 +29,10 @@ const DATA_DIR = path.resolve(args.data ?? process.env.TRYCHAT_DATA ?? './trycha
 const ALLOW_SIGNUP = (args.signup ?? process.env.TRYCHAT_ALLOW_SIGNUP ?? 'true') !== 'false';
 const MAX_BODY = 20 * 1024 * 1024;
 const COLLECTIONS = new Set(['memories', 'conversations', 'skills', 'mcpServers', 'projects', 'plugins', 'prefs']);
+// What app builds from before the client sent its `collections` list know about. They are only sent
+// and only allowed to change these: an older build treats an item it can't store as deleted locally
+// and would push a tombstone for it (e.g. deleting every plugin on the account).
+const LEGACY_COLLECTIONS = new Set(['memories', 'conversations', 'skills', 'mcpServers', 'projects', 'prefs']);
 
 // ---------- Tiny JSON file store (one file per account + an index) ----------
 
@@ -170,7 +174,7 @@ const routes = {
   'GET /me': async (req) => ({ user: publicUser((await authenticate(req)).user) }),
 
   /**
-   * Two-way sync. Body: { since: number, changes: [{collection, id, data, updatedAt, deleted}] }.
+   * Two-way sync. Body: { since: number, collections: string[], changes: [{collection, id, data, updatedAt, deleted}] }.
    * Last write (by updatedAt) wins per item. Returns every item stored after `since`
    * (a server sequence number, so device clocks don't matter) and the new cursor.
    */
@@ -178,9 +182,12 @@ const routes = {
     const { user } = await authenticate(req);
     const store = await loadUser(user.id);
     const changes = Array.isArray(body.changes) ? body.changes : [];
+    const known = Array.isArray(body.collections)
+      ? new Set(body.collections.filter((c) => COLLECTIONS.has(c)))
+      : LEGACY_COLLECTIONS;
     let changed = false;
     for (const c of changes) {
-      if (!COLLECTIONS.has(c.collection) || typeof c.id !== 'string' || !c.id) continue;
+      if (!known.has(c.collection) || typeof c.id !== 'string' || !c.id) continue;
       const key = `${c.collection}/${c.id}`;
       const existing = store.items[key];
       const updatedAt = Number(c.updatedAt) || Date.now();
@@ -198,7 +205,7 @@ const routes = {
     if (changed) await writeJson(userFile(user.id), store);
     const since = Number(body.since) || 0;
     const items = Object.values(store.items)
-      .filter((i) => i.seq > since)
+      .filter((i) => i.seq > since && known.has(i.collection))
       .map(({ seq, ...rest }) => rest);
     return { cursor: store.seq, items };
   },
