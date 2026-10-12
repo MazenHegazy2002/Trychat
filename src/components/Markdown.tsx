@@ -4,7 +4,7 @@ import { memo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { TextStyle } from 'react-native';
 
-import { isPreviewable, setPreview } from '../lib/preview';
+import { isPreviewable, previewVerb, setPreview } from '../lib/preview';
 import { useTheme } from '../lib/theme';
 import type { Theme } from '../lib/theme';
 
@@ -144,7 +144,7 @@ function CodeBlock({ lang, code, closed, theme }: { lang: string; code: string; 
         <View style={{ flexDirection: 'row', gap: 14 }}>
           {closed && isPreviewable(lang) && (
             <Pressable onPress={preview} hitSlop={8}>
-              <Text style={[styles.codeAction, { color: '#A5B4FC' }]}>▶ Preview</Text>
+              <Text style={[styles.codeAction, { color: '#A5B4FC' }]}>▶ {previewVerb(lang)}</Text>
             </Pressable>
           )}
           <Pressable onPress={copy} hitSlop={8}>

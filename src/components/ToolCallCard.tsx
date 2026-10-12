@@ -24,17 +24,31 @@ export function ToolCallCard({ call, onApprove, onDeny }: Props) {
   const theme = useTheme();
   const [open, setOpen] = useState(false);
   const service = toolService(call);
-  const where = service === 'github' ? 'GitHub' : service === 'laptop' ? 'Laptop' : 'Tool';
+  const where =
+    {
+      github: 'GitHub',
+      laptop: 'Laptop',
+      code: 'Code',
+      agents: 'Agents',
+      skills: 'Skill',
+      mcp: call.name.split('.')[1] ?? 'MCP',
+    }[service ?? 'code'] ?? 'Tool';
 
   // What the user is approving: the command, or the file content being written.
   const detail =
-    typeof call.args.command === 'string'
+    typeof call.args.code === 'string'
+      ? call.args.code
+      : Array.isArray(call.args.tasks)
+        ? call.args.tasks.map((t: any, i: number) => `${i + 1}. ${typeof t === 'string' ? t : t?.task}`).join('\n')
+        : typeof call.args.command === 'string'
       ? call.args.command + (call.args.cwd ? `\n# in ${call.args.cwd}` : '')
       : typeof call.args.content === 'string'
         ? call.args.content
         : typeof call.args.body === 'string'
           ? call.args.body
-          : null;
+          : service === 'mcp'
+            ? JSON.stringify(call.args, null, 2)
+            : null;
 
   if (call.status !== 'pending') {
     return (

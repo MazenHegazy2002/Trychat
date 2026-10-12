@@ -12,7 +12,7 @@ import type { Settings } from '../lib/types';
 
 export default function SettingsScreen() {
   const theme = useTheme();
-  const { settings, updateSettings, clearConversations } = useStore();
+  const { settings, updateSettings, clearConversations, account, skills, mcpServers, mcpTools } = useStore();
   const [draft, setDraft] = useState<Settings>(settings);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -44,6 +44,26 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+      <Pressable
+        onPress={() => router.push('/account')}
+        style={[inputStyle, { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 }]}
+      >
+        <View style={[styles.avatar, { backgroundColor: account ? theme.primary : theme.border }]}>
+          <Text style={{ color: theme.onPrimary, fontWeight: '700' }}>
+            {account ? (account.user.name || account.user.email)[0]?.toUpperCase() : '?'}
+          </Text>
+        </View>
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>
+            {account ? account.user.name : 'Sign in or create an account'}
+          </Text>
+          <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
+            {account ? `${account.user.email} · memory synced` : 'Keep your memory and chats on every device'}
+          </Text>
+        </View>
+        <Text style={{ color: theme.muted, fontSize: 18 }}>›</Text>
+      </Pressable>
+
       <Text style={[styles.section, { color: theme.text }]}>Server</Text>
       {label('Base URL')}
       <TextInput
@@ -97,6 +117,31 @@ export default function SettingsScreen() {
         </View>
         <Text style={{ color: theme.muted, fontSize: 18 }}>›</Text>
       </Pressable>
+
+      {(
+        [
+          ['/skills', 'Skills', `${skills.filter((k) => k.enabled).length} enabled`],
+          [
+            '/mcp',
+            'MCP servers',
+            mcpServers.length
+              ? `${mcpServers.length} server${mcpServers.length === 1 ? '' : 's'} · ${Object.values(mcpTools).flat().length} tools`
+              : 'Add tools from MCP servers',
+          ],
+        ] as const
+      ).map(([href, title, sub]) => (
+        <Pressable
+          key={href}
+          onPress={() => router.push(href)}
+          style={[inputStyle, { flexDirection: 'row', alignItems: 'center', marginTop: 8 }]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.text, fontSize: 15 }}>{title}</Text>
+            <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>{sub}</Text>
+          </View>
+          <Text style={{ color: theme.muted, fontSize: 18 }}>›</Text>
+        </Pressable>
+      ))}
 
       <Text style={[styles.section, { color: theme.text }]}>Model</Text>
       {label('Default model for new chats')}
@@ -152,6 +197,8 @@ export default function SettingsScreen() {
         [
           ['builderMode', 'Builder mode', 'Ask the model for complete, runnable apps you can preview in-app'],
           ['memoryEnabled', 'Long-term memory', 'The model remembers facts about you across chats'],
+          ['subAgents', 'Sub-agents', 'Let TryChat send helper agents to work on parts of a task in parallel'],
+          ['codeExecution', 'Run code', 'Let TryChat run JavaScript and Python on your phone to calculate and test'],
           ['stream', 'Stream responses', 'Show text as it is generated (turn off if your server does not support it)'],
         ] as const
       ).map(([key, title, desc]) => (
@@ -192,5 +239,6 @@ const styles = StyleSheet.create({
   input: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, minHeight: 44 },
   button: { marginTop: 14, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   chip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 6 },
+  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   switchRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
 });

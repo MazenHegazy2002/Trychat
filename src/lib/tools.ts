@@ -1,4 +1,6 @@
-import type { Settings, ToolCall } from './types';
+import { callMcpTool, mcpToolName } from './mcp';
+import { normalizeLanguage, runCode } from './runner';
+import type { McpServer, McpTool, Settings, Skill, ToolCall } from './types';
 
 /**
  * Tools the model can use: GitHub (REST API with a personal access token) and the
@@ -7,16 +9,30 @@ import type { Settings, ToolCall } from './types';
  * which works with any OpenAI-compatible server, even ones without native tool calling.
  */
 
-type Kind = 'read' | 'write' | 'command';
+type Kind = 'read' | 'write' | 'command' | 'code' | 'agent' | 'mcp';
+export type Service = 'github' | 'laptop' | 'code' | 'agents' | 'skills' | 'mcp';
+
+/** Everything a tool may need at run time. */
+export interface ToolContext {
+  settings: Settings;
+  skills: Skill[];
+  mcpServers: McpServer[];
+  /** Tools discovered on each MCP server, by server id. */
+  mcpTools: Record<string, McpTool[]>;
+  /** Provided by the store; runs helper agents in parallel and returns their combined answers. */
+  runSubAgents?: (tasks: { task: string; model?: string }[]) => Promise<string>;
+}
 
 interface ToolDef {
-  service: 'github' | 'laptop';
+  service: Service;
   kind: Kind;
   description: string;
   params: string;
   /** Short human label shown in the chat, e.g. "Read README.md on GitHub". */
   label: (args: Args) => string;
-  run: (settings: Settings, args: Args) => Promise<unknown>;
+  run: (ctx: ToolContext, args: Args) => Promise<unknown>;
+  /** For MCP tools: the server they belong to. */
+  server?: McpServer;
 }
 
 type Args = Record<string, any>;
@@ -82,7 +98,7 @@ export async function laptopInfo(settings: Settings): Promise<{ hostname: string
 
 // ---------- Tool table ----------
 
-const TOOLS: Record<string, ToolDef> = {
+const STATIC_TOOLS: Record<string, Omit<ToolDef, 'run'> & { run: (s: Settings, args: Args) => Promise<unknown> }> = {
   'github.list_repos': {
     service: 'github',
     kind: 'read',
@@ -214,33 +230,127 @@ const TOOLS: Record<string, ToolDef> = {
 export const githubConnected = (s: Settings) => !!s.githubToken;
 export const laptopConnected = (s: Settings) => !!s.bridgeUrl && !!s.bridgeToken;
 
-function available(s: Settings): [string, ToolDef][] {
-  return Object.entries(TOOLS).filter(
-    ([, t]) => (t.service === 'github' && githubConnected(s)) || (t.service === 'laptop' && laptopConnected(s)),
+/** All tools available right now, given connections, settings, skills and MCP servers. */
+export function getTools(ctx: ToolContext): Record<string, ToolDef> {
+  const s = ctx.settings;
+  const tools: Record<string, ToolDef> = {};
+  for (const [name, t] of Object.entries(STATIC_TOOLS)) {
+    if ((t.service === 'github' && githubConnected(s)) || (t.service === 'laptop' && laptopConnected(s))) {
+      tools[name] = { ...t, run: (c, a) => t.run(c.settings, a) };
+    }
+  }
+
+  if (s.codeExecution) {
+    tools['code.run'] = {
+      service: 'code',
+      kind: 'code',
+      description:
+        'Run JavaScript or Python on the phone and get the printed output (sandboxed; Python has numpy/pandas via Pyodide; no access to the user\'s files). Use it to calculate, test code, or check data.',
+      params: '{"language":"python|javascript","code":"print(2**10)"}',
+      label: (a) => `Ran ${normalizeLanguage(a.language ?? '') ?? 'code'}`,
+      run: async (_c, a) => {
+        const lang = normalizeLanguage(a.language ?? '');
+        if (!lang) throw new Error('language must be "python" or "javascript"');
+        return runCode(lang, String(a.code ?? ''));
+      },
+    };
+  }
+
+  const enabledSkills = ctx.skills.filter((k) => k.enabled);
+  if (enabledSkills.length) {
+    tools['skills.read'] = {
+      service: 'skills',
+      kind: 'read',
+      description: 'Load the full instructions of one of the user\'s skills before doing a task it covers.',
+      params: '{"name":"skill name"}',
+      label: (a) => `Loaded the “${a.name}” skill`,
+      run: async (_c, a) => {
+        const skill = enabledSkills.find((k) => k.name.toLowerCase() === String(a.name ?? '').toLowerCase());
+        if (!skill) throw new Error(`No skill named "${a.name}". Available: ${enabledSkills.map((k) => k.name).join(', ')}`);
+        return skill.instructions;
+      },
+    };
+  }
+
+  if (s.subAgents && ctx.runSubAgents) {
+    const runSubAgents = ctx.runSubAgents;
+    tools['agents.run'] = {
+      service: 'agents',
+      kind: 'agent',
+      description:
+        'Send up to 5 sub-agents to work in parallel. Each gets one self-contained task (include all context it needs), can use the read-only tools and code.run, and returns its answer. Use for research, comparing options, or splitting big jobs.',
+      params: '{"tasks":[{"task":"...","model":"optional model id"}]}',
+      label: (a) => {
+        const n = Array.isArray(a.tasks) ? a.tasks.length : 0;
+        return `Sent ${n} sub-agent${n === 1 ? '' : 's'}`;
+      },
+      run: async (_c, a) => {
+        const tasks = (Array.isArray(a.tasks) ? a.tasks : [])
+          .map((t: any) => (typeof t === 'string' ? { task: t } : t))
+          .filter((t: any) => t?.task)
+          .slice(0, 5);
+        if (!tasks.length) throw new Error('Give at least one task: {"tasks":[{"task":"..."}]}');
+        return runSubAgents(tasks);
+      },
+    };
+  }
+
+  for (const server of ctx.mcpServers) {
+    if (!server.enabled) continue;
+    for (const tool of ctx.mcpTools[server.id] ?? []) {
+      tools[mcpToolName(server, tool.name)] = {
+        service: 'mcp',
+        kind: 'mcp',
+        server,
+        description: `[${server.name}] ${(tool.description ?? '').slice(0, 300)}`,
+        params: schemaHint(tool.inputSchema),
+        label: () => `Used ${tool.name} on ${server.name}`,
+        run: (_c, a) => callMcpTool(server, tool.name, a),
+      };
+    }
+  }
+  return tools;
+}
+
+/** Compact '{"arg":"type"}' summary of a JSON schema so the prompt stays short. */
+function schemaHint(schema: any): string {
+  const props = schema?.properties ?? {};
+  const required: string[] = schema?.required ?? [];
+  const entries = Object.entries(props).map(
+    ([k, v]: [string, any]) => `"${k}${required.includes(k) ? '' : '?'}":"${v?.type ?? 'any'}"`,
   );
+  return `{${entries.join(',')}}`;
 }
 
-export function toolInstructions(s: Settings): string | null {
-  const tools = available(s);
-  if (!tools.length) return null;
-  return `You can use tools to work with the user's ${[
-    githubConnected(s) && 'GitHub account',
-    laptopConnected(s) && 'laptop',
-  ]
-    .filter(Boolean)
-    .join(' and ')}.
-To use a tool, write ONE tool block at the end of your reply and then stop writing:
+export function toolInstructions(ctx: ToolContext, only?: (name: string, t: ToolDef) => boolean): string | null {
+  const tools = Object.entries(getTools(ctx)).filter(([n, t]) => !only || only(n, t));
+  const parts: string[] = [];
+  if (tools.length) {
+    parts.push(`You can use tools. To use one, write ONE tool block at the end of your reply and then stop writing:
 <tool name="TOOL_NAME">{"arg":"value"}</tool>
-The arguments must be valid JSON. The result is sent back to you in the next message, then continue the task.
-Use one tool at a time. Explain briefly what you're about to do before the tool block. Never invent tool results.
+The arguments must be valid JSON. The result is sent back to you in the next message; then continue the task.
+Use one tool at a time. Briefly say what you're about to do before the tool block. Never invent tool results.
 Available tools:
-${tools.map(([name, t]) => `- ${name} ${t.params} — ${t.description}`).join('\n')}`;
+${tools.map(([name, t]) => `- ${name} ${t.params} — ${t.description}`).join('\n')}`);
+  }
+  const skills = ctx.skills.filter((k) => k.enabled);
+  if (skills.length && tools.some(([n]) => n === 'skills.read')) {
+    parts.push(
+      `The user has these skills. When a task matches one, load it with skills.read first and follow it:\n${skills
+        .map((k) => `- ${k.name}: ${k.description}`)
+        .join('\n')}`,
+    );
+  }
+  if (ctx.settings.repos.length && githubConnected(ctx.settings)) {
+    parts.push(`The user's main GitHub repositories: ${ctx.settings.repos.join(', ')}. Prefer these when they ask about "my repo".`);
+  }
+  return parts.length ? parts.join('\n\n') : null;
 }
 
-const TOOL_RE = /<tool\s+name="([\w.]+)"\s*>([\s\S]*?)<\/tool>/i;
+const TOOL_RE = /<tool\s+name="([\w.\-]+)"\s*>([\s\S]*?)<\/tool>/i;
 
 /** Finds the first complete tool block in the model's reply. */
-export function parseToolCall(text: string): { call: ToolCall | null; before: string } {
+export function parseToolCall(text: string, ctx: ToolContext): { call: ToolCall | null; before: string } {
   const m = text.match(TOOL_RE);
   if (!m) return { call: null, before: text };
   let args: Args = {};
@@ -250,12 +360,12 @@ export function parseToolCall(text: string): { call: ToolCall | null; before: st
   } catch {
     parseError = 'Tool arguments were not valid JSON.';
   }
-  const known = TOOLS[m[1]];
+  const known = getTools(ctx)[m[1]];
   const call: ToolCall = {
     name: m[1],
     args,
     status: known && !parseError ? 'pending' : 'error',
-    result: !known ? `Unknown tool "${m[1]}".` : parseError,
+    result: !known ? `Unknown or unavailable tool "${m[1]}".` : parseError,
   };
   return { call, before: text.slice(0, m.index).trim() };
 }
@@ -265,30 +375,54 @@ export function stripToolTags(text: string): string {
   return text.replace(/<tool\s[\s\S]*?(<\/tool>|$)/gi, '').trim();
 }
 
-export function toolLabel(call: ToolCall): string {
-  const def = TOOLS[call.name];
+const SERVICE_OF_PREFIX: Record<string, Service> = {
+  github: 'github',
+  laptop: 'laptop',
+  code: 'code',
+  agents: 'agents',
+  skills: 'skills',
+  mcp: 'mcp',
+};
+
+export function toolService(call: ToolCall): Service | null {
+  return SERVICE_OF_PREFIX[call.name.split('.')[0]] ?? null;
+}
+
+export function toolLabel(call: ToolCall, ctx?: ToolContext): string {
+  const def = ctx ? getTools(ctx)[call.name] : STATIC_TOOLS[call.name];
   try {
-    return def ? def.label(call.args) : call.name;
+    if (def) return def.label(call.args);
   } catch {
-    return call.name;
+    // fall through
+  }
+  if (call.name.startsWith('mcp.')) return `Used ${call.name.split('.').slice(2).join('.')} (${call.name.split('.')[1]})`;
+  if (call.name === 'code.run') return `Ran ${call.args.language ?? 'code'}`;
+  if (call.name === 'agents.run') return 'Sent sub-agents';
+  return call.name;
+}
+
+export function needsApproval(call: ToolCall, ctx: ToolContext): boolean {
+  const def = getTools(ctx)[call.name];
+  const s = ctx.settings;
+  switch (def?.kind) {
+    case 'command':
+      return s.confirmCommands;
+    case 'write':
+      return s.confirmWrites;
+    case 'mcp':
+      return def.server?.confirm ?? true;
+    case 'code':
+    case 'agent':
+      return false;
+    default:
+      return s.confirmReads;
   }
 }
 
-export function toolService(call: ToolCall): 'github' | 'laptop' | null {
-  return TOOLS[call.name]?.service ?? null;
-}
-
-export function needsApproval(call: ToolCall, s: Settings): boolean {
-  const kind = TOOLS[call.name]?.kind;
-  if (kind === 'command') return s.confirmCommands;
-  if (kind === 'write') return s.confirmWrites;
-  return s.confirmReads;
-}
-
-export async function runTool(call: ToolCall, s: Settings): Promise<string> {
-  const def = TOOLS[call.name];
-  if (!def) throw new Error(`Unknown tool "${call.name}"`);
-  const out = await def.run(s, call.args);
+export async function runTool(call: ToolCall, ctx: ToolContext): Promise<string> {
+  const def = getTools(ctx)[call.name];
+  if (!def) throw new Error(`Unknown or unavailable tool "${call.name}"`);
+  const out = await def.run(ctx, call.args);
   const text = typeof out === 'string' ? out : JSON.stringify(out, null, 2);
   return text.length > MAX_RESULT_CHARS ? text.slice(0, MAX_RESULT_CHARS) + '\n…[truncated]' : text;
 }

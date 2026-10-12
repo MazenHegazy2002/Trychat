@@ -2,12 +2,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-import type { Conversation, Memory, Settings } from './types';
+import type { Account, Conversation, McpServer, Memory, Settings, Skill } from './types';
 
 const KEYS = {
   settings: 'trychat.settings',
   conversations: 'trychat.conversations',
   memories: 'trychat.memories',
+  skills: 'trychat.skills',
+  mcpServers: 'trychat.mcpServers',
+  account: 'trychat.account',
+  syncSnapshot: 'trychat.syncSnapshot',
 };
 
 // Settings fields kept in the device's secure storage instead of AsyncStorage.
@@ -31,6 +35,9 @@ export const DEFAULT_SETTINGS: Settings = {
   confirmCommands: true,
   confirmWrites: true,
   confirmReads: false,
+  repos: [],
+  subAgents: true,
+  codeExecution: true,
 };
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {
@@ -81,3 +88,33 @@ export const saveConversations = (c: Conversation[]) => writeJson(KEYS.conversat
 
 export const loadMemories = () => readJson<Memory[]>(KEYS.memories, []);
 export const saveMemories = (m: Memory[]) => writeJson(KEYS.memories, m);
+
+export const loadSkills = () => readJson<Skill[]>(KEYS.skills, []);
+export const saveSkills = (s: Skill[]) => writeJson(KEYS.skills, s);
+
+export const loadMcpServers = () => readJson<McpServer[]>(KEYS.mcpServers, []);
+export const saveMcpServers = (s: McpServer[]) => writeJson(KEYS.mcpServers, s);
+
+// The account (with its session token) goes in secure storage on native.
+export async function loadAccount(): Promise<Account | null> {
+  const raw = Platform.OS === 'web' ? await AsyncStorage.getItem(KEYS.account) : await SecureStore.getItemAsync(KEYS.account);
+  try {
+    return raw ? (JSON.parse(raw) as Account) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveAccount(account: Account | null): Promise<void> {
+  if (Platform.OS === 'web') {
+    if (account) await AsyncStorage.setItem(KEYS.account, JSON.stringify(account));
+    else await AsyncStorage.removeItem(KEYS.account);
+    return;
+  }
+  if (account) await SecureStore.setItemAsync(KEYS.account, JSON.stringify(account));
+  else await SecureStore.deleteItemAsync(KEYS.account);
+}
+
+/** What the server last confirmed, per "collection/id" → updatedAt. Used to detect local edits and deletions. */
+export const loadSyncSnapshot = () => readJson<Record<string, number>>(KEYS.syncSnapshot, {});
+export const saveSyncSnapshot = (s: Record<string, number>) => writeJson(KEYS.syncSnapshot, s);

@@ -1,0 +1,10 @@
+{
+  "name": "trychat-server",
+  "version": "1.0.0",
+  "description": "Accounts and cross-device sync (memories, chats, skills) for the TryChat app.",
+  "type": "module",
+  "bin": { "trychat-server": "trychat-server.mjs" },
+  "scripts": { "start": "node trychat-server.mjs" },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}

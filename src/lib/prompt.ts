@@ -1,6 +1,7 @@
 import type { ApiMessage } from './api';
 import { formatToolCall, toolInstructions } from './tools';
-import type { ChatMessage, Memory, Settings } from './types';
+import type { ToolContext } from './tools';
+import type { ChatMessage, Memory } from './types';
 
 const MEMORY_INSTRUCTIONS = `You have a long-term memory that persists across all conversations with this user.
 When the user tells you something worth remembering long-term (their name, preferences, goals, projects, facts about them),
@@ -14,7 +15,8 @@ When building something that runs in a browser, return ONE complete, self-contai
 (inline CSS and JavaScript, CDN libraries allowed) in a single \`\`\`html code block, so the user can tap "Preview" to run it on their phone.
 Make UIs mobile-friendly. For other languages, return complete, runnable code with brief instructions.`;
 
-export function buildSystemPrompt(settings: Settings, memories: Memory[]): string {
+export function buildSystemPrompt(ctx: ToolContext, memories: Memory[]): string {
+  const settings = ctx.settings;
   const parts = [settings.systemPrompt.trim()];
   if (settings.builderMode) parts.push(BUILDER_INSTRUCTIONS);
   if (settings.memoryEnabled) {
@@ -25,22 +27,19 @@ export function buildSystemPrompt(settings: Settings, memories: Memory[]): strin
         : 'You do not remember anything about the user yet.',
     );
   }
-  const tools = toolInstructions(settings);
+  const tools = toolInstructions(ctx);
   if (tools) parts.push(tools);
   parts.push(`Current date: ${new Date().toDateString()}.`);
   return parts.filter(Boolean).join('\n\n');
 }
 
-export function buildApiMessages(
-  settings: Settings,
-  memories: Memory[],
-  history: ChatMessage[],
-): ApiMessage[] {
+export function buildApiMessages(ctx: ToolContext, memories: Memory[], history: ChatMessage[]): ApiMessage[] {
+  const settings = ctx.settings;
   const recent = history
     .filter((m) => !m.error && (m.content.trim() || m.toolCall))
     .slice(-Math.max(1, settings.contextMessages));
   return [
-    { role: 'system', content: buildSystemPrompt(settings, memories) },
+    { role: 'system', content: buildSystemPrompt(ctx, memories) },
     ...recent.map((m) => ({
       role: m.role,
       content: m.toolCall ? `${m.content}\n\n${formatToolCall(m.toolCall)}`.trim() : m.content,

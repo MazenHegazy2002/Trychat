@@ -1,20 +1,42 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { AppState } from 'react-native';
 
+import { runSubAgents } from './agents';
 import { chat } from './api';
 import { uid } from './id';
 import { buildApiMessages, extractMemoryOps, stripMemoryTags } from './prompt';
 import * as storage from './storage';
+import { listMcpTools } from './mcp';
+import * as sync from './sync';
 import { formatToolResult, needsApproval, parseToolCall, runTool, stripToolTags } from './tools';
-import type { ChatMessage, Conversation, Memory, Settings } from './types';
+import type { ToolContext } from './tools';
+import type { Account, ChatMessage, Conversation, McpServer, McpTool, Memory, Settings, Skill } from './types';
+
+export type SyncStatus = { state: 'idle' | 'syncing' | 'error'; error?: string };
 
 interface Store {
   ready: boolean;
   settings: Settings;
   conversations: Conversation[];
   memories: Memory[];
+  skills: Skill[];
+  mcpServers: McpServer[];
+  /** Tools discovered on each MCP server (by server id) and connection errors. */
+  mcpTools: Record<string, McpTool[]>;
+  mcpErrors: Record<string, string>;
+  account: Account | null;
+  syncStatus: SyncStatus;
   /** Conversation ids with a request in flight. */
   busy: Record<string, boolean>;
+  saveSkill: (skill: Skill) => void;
+  deleteSkill: (id: string) => void;
+  saveMcpServer: (server: McpServer) => void;
+  deleteMcpServer: (id: string) => void;
+  refreshMcpTools: (serverId?: string) => Promise<void>;
+  signIn: (serverUrl: string, mode: 'signin' | 'signup', form: { email: string; password: string; name?: string }) => Promise<void>;
+  signOut: () => Promise<void>;
+  syncNow: () => Promise<void>;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   createConversation: () => Conversation;
   deleteConversation: (id: string) => void;
@@ -66,25 +88,60 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [mcpTools, setMcpTools] = useState<Record<string, McpTool[]>>({});
+  const [mcpErrors, setMcpErrors] = useState<Record<string, string>>({});
+  const [account, setAccount] = useState<Account | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'idle' });
 
   // Refs mirror state so async request code always sees the latest values.
   const convRef = useRef(conversations);
   const memRef = useRef(memories);
   const settingsRef = useRef(settings);
   const controllers = useRef<Record<string, AbortController>>({});
+  const skillsRef = useRef(skills);
+  const mcpRef = useRef(mcpServers);
+  const mcpToolsRef = useRef(mcpTools);
+  const accountRef = useRef(account);
+  const busyRef = useRef(busy);
   convRef.current = conversations;
   memRef.current = memories;
   settingsRef.current = settings;
+  skillsRef.current = skills;
+  mcpRef.current = mcpServers;
+  mcpToolsRef.current = mcpTools;
+  accountRef.current = account;
+  busyRef.current = busy;
 
   useEffect(() => {
-    Promise.all([storage.loadSettings(), storage.loadConversations(), storage.loadMemories()]).then(
-      ([s, c, m]) => {
-        setSettings(s);
-        setConversations(c);
-        setMemories(m);
-        setReady(true);
-      },
-    );
+    Promise.all([
+      storage.loadSettings(),
+      storage.loadConversations(),
+      storage.loadMemories(),
+      storage.loadSkills(),
+      storage.loadMcpServers(),
+      storage.loadAccount(),
+    ]).then(([s, c, m, k, servers, acct]) => {
+      setSettings(s);
+      setConversations(c);
+      setMemories(m);
+      setSkills(k);
+      setMcpServers(servers);
+      setAccount(acct);
+      setReady(true);
+    });
+  }, []);
+
+  /** Everything tools need, using the latest state. */
+  const toolCtx = useCallback((model: string): ToolContext => {
+    const base: ToolContext = {
+      settings: settingsRef.current,
+      skills: skillsRef.current,
+      mcpServers: mcpRef.current,
+      mcpTools: mcpToolsRef.current,
+    };
+    return { ...base, runSubAgents: (tasks) => runSubAgents(base, model, tasks) };
   }, []);
 
   // Persist with a short debounce so streaming updates don't hammer storage.
@@ -98,12 +155,159 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (ready) storage.saveMemories(memories);
   }, [memories, ready]);
 
+  useEffect(() => {
+    if (ready) storage.saveSkills(skills);
+  }, [skills, ready]);
+
+  useEffect(() => {
+    if (ready) storage.saveMcpServers(mcpServers);
+  }, [mcpServers, ready]);
+
+  // ---------- MCP ----------
+
+  const refreshMcpTools = useCallback(async (serverId?: string) => {
+    const targets = mcpRef.current.filter((x) => x.enabled && (!serverId || x.id === serverId));
+    await Promise.all(
+      targets.map(async (server) => {
+        try {
+          const tools = await listMcpTools(server);
+          setMcpTools((t) => ({ ...t, [server.id]: tools }));
+          setMcpErrors(({ [server.id]: _, ...rest }) => rest);
+        } catch (e) {
+          setMcpTools(({ [server.id]: _, ...rest }) => rest);
+          setMcpErrors((errs) => ({ ...errs, [server.id]: e instanceof Error ? e.message : String(e) }));
+        }
+      }),
+    );
+  }, []);
+
+  // Discover MCP tools whenever the server list changes.
+  const mcpKey = mcpServers.map((x) => `${x.id}:${x.url}:${x.enabled}:${x.token ?? ''}`).join('|');
+  useEffect(() => {
+    if (ready) refreshMcpTools();
+  }, [ready, mcpKey, refreshMcpTools]);
+
+  const saveMcpServer = useCallback((server: McpServer) => {
+    const next = { ...server, updatedAt: Date.now() };
+    setMcpServers((list) => (list.some((x) => x.id === server.id) ? list.map((x) => (x.id === server.id ? next : x)) : [...list, next]));
+  }, []);
+
+  const deleteMcpServer = useCallback((id: string) => {
+    setMcpServers((list) => list.filter((x) => x.id !== id));
+  }, []);
+
+  // ---------- Skills ----------
+
+  const saveSkill = useCallback((skill: Skill) => {
+    const next = { ...skill, updatedAt: Date.now() };
+    setSkills((list) => (list.some((x) => x.id === skill.id) ? list.map((x) => (x.id === skill.id ? next : x)) : [...list, next]));
+  }, []);
+
+  const deleteSkill = useCallback((id: string) => {
+    setSkills((list) => list.filter((x) => x.id !== id));
+  }, []);
+
+  // ---------- Account & sync ----------
+
+  const syncing = useRef(false);
+
+  const syncNow = useCallback(async () => {
+    const acct = accountRef.current;
+    if (!acct || syncing.current) return;
+    syncing.current = true;
+    setSyncStatus({ state: 'syncing' });
+    try {
+      const snapshot = await storage.loadSyncSnapshot();
+      const state: sync.SyncState = {
+        memories: memRef.current,
+        conversations: convRef.current.filter((c) => !busyRef.current[c.id]), // don't upload half-streamed replies
+        skills: skillsRef.current,
+        mcpServers: mcpRef.current,
+        settings: settingsRef.current,
+      };
+      const busyKeys = new Set(Object.keys(busyRef.current).map((id) => `conversations/${id}`));
+      const changes = sync.pendingChanges(state, snapshot).filter((c) => !busyKeys.has(`${c.collection}/${c.id}`));
+      const { cursor, items } = await sync.pushPull(acct, changes);
+
+      setMemories((list) => sync.mergeList(list, items, 'memories', (m) => m.updatedAt ?? m.createdAt));
+      setConversations((list) => {
+        const merged = sync.mergeList(list, items, 'conversations', (c) => c.updatedAt);
+        return merged === list ? list : merged.sort((x, y) => y.updatedAt - x.updatedAt); // same array = no re-sync
+      });
+      setSkills((list) => sync.mergeList(list, items, 'skills', (k) => k.updatedAt));
+      setMcpServers((list) =>
+        sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, (data, local) => ({ ...data, token: local?.token })),
+      );
+      const merged = sync.mergePrefs(settingsRef.current, items);
+      if (merged !== settingsRef.current) {
+        setSettings(merged);
+        await storage.saveSettings(merged);
+      }
+
+      await storage.saveSyncSnapshot(sync.nextSnapshot(snapshot, changes, items));
+      const next = { ...acct, cursor, lastSyncAt: Date.now() };
+      setAccount(next);
+      await storage.saveAccount(next);
+      setSyncStatus({ state: 'idle' });
+    } catch (e: any) {
+      if (e?.status === 401) {
+        setAccount(null);
+        await storage.saveAccount(null);
+      }
+      setSyncStatus({ state: 'error', error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      syncing.current = false;
+    }
+  }, []);
+
+  const signIn = useCallback(
+    async (serverUrl: string, mode: 'signin' | 'signup', form: { email: string; password: string; name?: string }) => {
+      const acct = await sync.signIn(serverUrl, mode, form);
+      // A different account starts from a clean sync state; this device's data is merged into it.
+      await storage.saveSyncSnapshot({});
+      setAccount(acct);
+      accountRef.current = acct;
+      await storage.saveAccount(acct);
+      await syncNow();
+    },
+    [syncNow],
+  );
+
+  const signOut = useCallback(async () => {
+    const acct = accountRef.current;
+    if (acct) await syncNow();
+    if (acct) await sync.signOut(acct);
+    setAccount(null);
+    accountRef.current = null;
+    await storage.saveAccount(null);
+    await storage.saveSyncSnapshot({});
+  }, [syncNow]);
+
+  // Sync shortly after any change, every minute, and when the app comes back to the foreground.
+  useEffect(() => {
+    if (!ready || !account || Object.keys(busy).length) return;
+    const t = setTimeout(syncNow, 2500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, account?.token, memories, conversations, skills, mcpServers, settings, busy]);
+
+  useEffect(() => {
+    if (!ready || !account) return;
+    const interval = setInterval(syncNow, 60_000);
+    const sub = AppState.addEventListener('change', (st) => st === 'active' && syncNow());
+    return () => {
+      clearInterval(interval);
+      sub.remove();
+    };
+  }, [ready, account?.token, syncNow]);
+
   const patchConversation = useCallback((id: string, fn: (c: Conversation) => Conversation) => {
     setConversations((list) => list.map((c) => (c.id === id ? fn(c) : c)));
   }, []);
 
   const updateSettings = useCallback(async (patch: Partial<Settings>) => {
-    const next = { ...settingsRef.current, ...patch };
+    const touchesPrefs = Object.keys(patch).some((k) => (sync.SYNCED_PREFS as readonly string[]).includes(k));
+    const next = { ...settingsRef.current, ...patch, ...(touchesPrefs ? { prefsUpdatedAt: Date.now() } : {}) };
     setSettings(next);
     await storage.saveSettings(next);
   }, []);
@@ -128,12 +332,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const renameConversation = useCallback(
-    (id: string, title: string) => patchConversation(id, (c) => ({ ...c, title })),
+    (id: string, title: string) => patchConversation(id, (c) => ({ ...c, title, updatedAt: Date.now() })),
     [patchConversation],
   );
 
   const setConversationModel = useCallback(
-    (id: string, model: string) => patchConversation(id, (c) => ({ ...c, model })),
+    (id: string, model: string) => patchConversation(id, (c) => ({ ...c, model, updatedAt: Date.now() })),
     [patchConversation],
   );
 
@@ -201,7 +405,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         raw = await chat({
           settings: s,
           model,
-          messages: buildApiMessages(s, memRef.current, history),
+          messages: buildApiMessages(toolCtx(model), memRef.current, history),
           signal: controller.signal,
           onText: (text) => {
             raw = text;
@@ -218,14 +422,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       delete controllers.current[conversationId];
       if (s.memoryEnabled) applyMemoryOps(raw);
 
-      const { call, before } = controller.signal.aborted ? { call: null, before: raw } : parseToolCall(raw);
+      const { call, before } = controller.signal.aborted ? { call: null, before: raw } : parseToolCall(raw, toolCtx(model));
       if (!call) {
         setAssistant({ content: display(raw) });
         endBusy(conversationId);
         return;
       }
 
-      if (call.status === 'pending' && toolStepsSinceUser(history) < MAX_AUTO_TOOL_STEPS && !needsApproval(call, s)) {
+      if (call.status === 'pending' && toolStepsSinceUser(history) < MAX_AUTO_TOOL_STEPS && !needsApproval(call, toolCtx(model))) {
         call.status = 'running';
       }
       const finished: ChatMessage = { ...assistant, content: display(before), toolCall: call };
@@ -236,7 +440,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       await continueAfterTool(conversationId, [...history, finished], finished.id);
     },
-    [patchConversation, applyMemoryOps],
+    [patchConversation, applyMemoryOps, toolCtx],
   );
 
   /** Runs (or skips, if denied/invalid) the tool on a message, then sends the result back to the model. */
@@ -258,7 +462,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const controller = new AbortController();
       controllers.current[conversationId] = controller;
       try {
-        call = { ...call, status: 'done', result: await runTool(call, settingsRef.current) };
+        const model = convRef.current.find((c) => c.id === conversationId)?.model || settingsRef.current.model;
+        call = { ...call, status: 'done', result: await runTool(call, toolCtx(model)) };
       } catch (e) {
         call = { ...call, status: 'error', result: e instanceof Error ? e.message : String(e) };
       }
@@ -328,11 +533,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const addMemory = useCallback((text: string) => {
     if (!text.trim()) return;
-    setMemories((list) => [...list, { id: uid(), text: text.trim(), createdAt: Date.now() }]);
+    const now = Date.now();
+    setMemories((list) => [...list, { id: uid(), text: text.trim(), createdAt: now, updatedAt: now }]);
   }, []);
 
   const updateMemory = useCallback((id: string, text: string) => {
-    setMemories((list) => list.map((m) => (m.id === id ? { ...m, text } : m)));
+    setMemories((list) => list.map((m) => (m.id === id ? { ...m, text, updatedAt: Date.now() } : m)));
   }, []);
 
   const deleteMemory = useCallback((id: string) => {
@@ -348,7 +554,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         settings,
         conversations,
         memories,
+        skills,
+        mcpServers,
+        mcpTools,
+        mcpErrors,
+        account,
+        syncStatus,
         busy,
+        saveSkill,
+        deleteSkill,
+        saveMcpServer,
+        deleteMcpServer,
+        refreshMcpTools,
+        signIn,
+        signOut,
+        syncNow,
         updateSettings,
         createConversation,
         deleteConversation,

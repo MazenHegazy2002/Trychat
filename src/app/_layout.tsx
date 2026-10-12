@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
 
+import { CodeRunnerHost } from '../components/CodeRunnerHost';
 import { StoreProvider, useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 
@@ -31,6 +32,9 @@ function Navigator() {
       <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       <Stack.Screen name="memory" options={{ title: 'Memory' }} />
       <Stack.Screen name="connections" options={{ title: 'Connections' }} />
+      <Stack.Screen name="account" options={{ title: 'Account' }} />
+      <Stack.Screen name="skills" options={{ title: 'Skills' }} />
+      <Stack.Screen name="mcp" options={{ title: 'MCP servers' }} />
       <Stack.Screen name="preview" options={{ title: 'Preview', presentation: 'modal' }} />
     </Stack>
   );
@@ -41,6 +45,7 @@ export default function RootLayout() {
     <StoreProvider>
       <StatusBar style="auto" />
       <Navigator />
+      <CodeRunnerHost />
     </StoreProvider>
   );
 }

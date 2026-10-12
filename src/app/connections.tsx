@@ -19,6 +19,18 @@ export default function ConnectionsScreen() {
   const [laptop, setLaptop] = useState<Status>({ state: 'idle' });
   const [showToken, setShowToken] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [newRepo, setNewRepo] = useState('');
+
+  const addRepo = () => {
+    const repo = newRepo
+      .trim()
+      .replace(/^https?:\/\/github\.com\//, '')
+      .replace(/\.git$/, '')
+      .replace(/\/+$/, '');
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || draft.repos.includes(repo)) return;
+    set('repos', [...draft.repos, repo]);
+    setNewRepo('');
+  };
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -107,6 +119,40 @@ export default function ConnectionsScreen() {
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <Text style={[styles.title, { color: theme.text }]}>Repositories</Text>
+        <Text style={[styles.help, { color: theme.muted }]}>
+          Pin the repos you work in most. TryChat treats them as “my repo” and goes there first.
+        </Text>
+        {draft.repos.map((repo) => (
+          <View key={repo} style={[styles.repoRow, { borderTopColor: theme.border }]}>
+            <Text style={[styles.mono, { color: theme.text, flex: 1, fontSize: 14 }]}>{repo}</Text>
+            <Pressable
+              onPress={() => set('repos', draft.repos.filter((r) => r !== repo))}
+              hitSlop={10}
+              accessibilityLabel={`Remove ${repo}`}
+            >
+              <Text style={{ color: theme.danger, fontSize: 16 }}>✕</Text>
+            </Pressable>
+          </View>
+        ))}
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 12, alignItems: 'center' }}>
+          <TextInput
+            value={newRepo}
+            onChangeText={setNewRepo}
+            onSubmitEditing={addRepo}
+            placeholder="owner/repo or GitHub link"
+            placeholderTextColor={theme.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[input, { flex: 1, backgroundColor: theme.bg }]}
+          />
+          <Pressable onPress={addRepo} hitSlop={8}>
+            <Text style={{ color: theme.primary, fontWeight: '700' }}>Add</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <Text style={[styles.title, { color: theme.text }]}>Laptop</Text>
         <Text style={[styles.help, { color: theme.muted, marginTop: 4 }]}>
           On your laptop, from this project's folder, start the bridge (Node 18+). It prints the address and pairing code
@@ -183,5 +229,6 @@ const styles = StyleSheet.create({
   button: { minHeight: 44, paddingHorizontal: 24, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   command: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 10, padding: 12, marginTop: 12 },
   mono: { fontFamily: 'monospace', fontSize: 12 },
+  repoRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44, borderTopWidth: StyleSheet.hairlineWidth, marginTop: 8 },
   switchRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, marginTop: 4 },
 });

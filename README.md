@@ -13,6 +13,13 @@ OpenAI-compatible server — preconfigured for `http://169.58.133.158:20128/v1`.
 - **GitHub** — connect a personal access token and TryChat can list your repos, read files, commit file changes and open issues.
 - **Your laptop** — run the small bridge on your computer and TryChat can list/read/write files and run commands there (tests, builds, scripts).
   Commands and changes show a **Run / Deny** card first; reads can run on their own (configurable).
+- **Accounts & synced memory** — sign up / sign in; memories, chats, skills, MCP servers and preferences sync to every device on the same account (API keys and tokens stay on each device).
+- **Sub-agents** — the model can send up to 5 helper agents to work in parallel (research, comparisons, splitting big jobs). They can read and run code but can't run commands or make changes.
+- **Run code in the app** — JavaScript and Python (Pyodide, with numpy/pandas) run on the phone; the model uses `code.run` to calculate and test.
+- **Preview everything** — HTML, React/JSX/TSX, JavaScript, Python, Markdown, Mermaid diagrams and SVG open in an in-app preview.
+- **Skills** — reusable instruction packs (write your own, add starters, or import a `SKILL.md` from GitHub). The model loads one when a task matches.
+- **MCP servers** — connect remote MCP servers (Streamable HTTP) and their tools become available in chat.
+- **Pinned repos** — tell TryChat which GitHub repos are "yours".
 - Markdown rendering with code blocks, dark mode, API key stored in the device's secure storage.
 
 ## Run it
@@ -27,6 +34,26 @@ On first launch open **Settings**, paste your API key, tap **Test connection**, 
 
 To prefill the key/model at build time instead, copy `.env.example` to `.env` and fill it in
 (`.env` is git-ignored — never commit your key).
+
+## Accounts (sync your memory across devices)
+
+Run the account server somewhere both phones can reach (your server works):
+
+```bash
+node server/trychat-server.mjs --port=8787 --data=./trychat-data   # --signup=false to close sign-ups
+```
+
+In the app: **Settings → Sign in** → enter the server address (default `http://169.58.133.158:8787`),
+then create an account. Sign in with the same account on another device and your memory, chats and
+skills appear there. Data syncs a few seconds after each change, every minute, and when the app opens.
+Passwords are hashed (scrypt); for use over the internet put the server behind HTTPS
+(e.g. `caddy reverse-proxy --from chat.example.com --to :8787`).
+
+## Skills and MCP servers
+
+**Settings → Skills:** add starter skills, write your own, or import one from GitHub
+(link to a `SKILL.md`, its folder, or a repo). **Settings → MCP servers:** add a server URL
+(and token if needed); its tools show up automatically. Tool calls ask first unless you turn that off per server.
 
 ## Connect GitHub and your laptop
 
@@ -68,5 +95,8 @@ src/lib/api.ts      OpenAI-compatible client (models + streaming chat completion
 src/lib/prompt.ts   system prompt, memory + builder instructions, <memory> tag parsing
 src/lib/store.tsx   app state, persistence, send/stop/regenerate, tool loop with approvals
 src/lib/tools.ts    GitHub + laptop tools (<tool> blocks work with any OpenAI-compatible model)
+src/lib/sync.ts     account sign-in + last-write-wins sync
+src/lib/agents.ts   sub-agents      src/lib/mcp.ts   MCP client      src/lib/runner.ts   in-app code runner
 bridge/             laptop bridge server (zero dependencies)
+server/             account + sync server (zero dependencies)
 ```

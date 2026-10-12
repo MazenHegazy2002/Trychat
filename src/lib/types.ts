@@ -35,6 +35,47 @@ export interface Memory {
   id: string;
   text: string;
   createdAt: number;
+  updatedAt?: number;
+}
+
+/** Reusable instructions the model can load when a task matches (like Claude skills). */
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  enabled: boolean;
+  /** Where it was imported from, e.g. a GitHub URL. */
+  source?: string;
+  updatedAt: number;
+}
+
+/** A remote MCP server (Streamable HTTP transport). */
+export interface McpServer {
+  id: string;
+  name: string;
+  url: string;
+  /** Sent as `Authorization: Bearer <token>`; kept on this device only. */
+  token?: string;
+  enabled: boolean;
+  /** Ask before every tool call on this server. */
+  confirm: boolean;
+  updatedAt: number;
+}
+
+export interface McpTool {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+}
+
+export interface Account {
+  serverUrl: string;
+  token: string;
+  user: { id: string; email: string; name: string };
+  /** Sync cursor (server sequence number) and when we last synced. */
+  cursor: number;
+  lastSyncAt?: number;
 }
 
 export interface Settings {
@@ -62,4 +103,12 @@ export interface Settings {
   confirmWrites: boolean;
   /** Ask before reading files / listing repos. */
   confirmReads: boolean;
+  /** GitHub repos ("owner/name") the model should know about and work in. */
+  repos: string[];
+  /** Let the model start sub-agents for parallel work. */
+  subAgents: boolean;
+  /** Let the model run JavaScript / Python on the phone. */
+  codeExecution: boolean;
+  /** When synced preferences last changed (drives last-write-wins across devices). */
+  prefsUpdatedAt?: number;
 }
