@@ -51,7 +51,8 @@ interface Store {
   signIn: (serverUrl: string, mode: 'signin' | 'signup', form: { email: string; password: string; name?: string }) => Promise<void>;
   signOut: () => Promise<void>;
   syncNow: () => Promise<void>;
-  updateSettings: (patch: Partial<Settings>) => Promise<void>;
+  /** Pass a function to build the patch from the latest settings (safe across awaits). */
+  updateSettings: (patch: Partial<Settings> | ((prev: Settings) => Partial<Settings>)) => Promise<void>;
   createConversation: (projectId?: string) => Conversation;
   /** Creates or updates a project. */
   saveProject: (project: Project) => void;
@@ -360,9 +361,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setConversations((list) => list.map((c) => (c.id === id ? fn(c) : c)));
   }, []);
 
-  const updateSettings = useCallback(async (patch: Partial<Settings>) => {
+  const updateSettings = useCallback(async (input: Partial<Settings> | ((prev: Settings) => Partial<Settings>)) => {
+    const patch = typeof input === 'function' ? input(settingsRef.current) : input;
     const touchesPrefs = Object.keys(patch).some((k) => (sync.SYNCED_PREFS as readonly string[]).includes(k));
     const next = { ...settingsRef.current, ...patch, ...(touchesPrefs ? { prefsUpdatedAt: Date.now() } : {}) };
+    settingsRef.current = next;
     setSettings(next);
     await storage.saveSettings(next);
   }, []);

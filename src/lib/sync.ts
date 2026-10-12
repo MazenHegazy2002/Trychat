@@ -112,7 +112,10 @@ export function mergePrefs(settings: Settings, items: SyncItem[]): Settings {
 
 export function nextSnapshot(snapshot: Record<string, number>, sent: SyncItem[], received: SyncItem[]) {
   const next = { ...snapshot };
-  for (const i of [...sent, ...received]) {
+  // The server echoes back everything it stored. A sent item it didn't store (e.g. a collection an
+  // older server doesn't know yet) stays pending and is sent again on the next sync.
+  const stored = new Set(received.map(key));
+  for (const i of [...sent.filter((s) => stored.has(key(s))), ...received]) {
     if (i.deleted) delete next[key(i)];
     else next[key(i)] = Math.max(next[key(i)] ?? 0, i.updatedAt);
   }

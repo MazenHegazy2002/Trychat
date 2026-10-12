@@ -116,7 +116,7 @@ function PluginsTab() {
       const target = await inspectGithubSource(repo, settings.githubToken);
       if (target.kind !== 'marketplace') throw new Error('That repo is a single plugin, not a marketplace. Install it from Settings › Plugins.');
       marketplaceCache.set(repo, target.marketplace);
-      if (!settings.marketplaces.includes(repo)) await updateSettings({ marketplaces: [...settings.marketplaces, repo] });
+      await updateSettings((s) => (s.marketplaces.includes(repo) ? {} : { marketplaces: [...s.marketplaces, repo] }));
       setNewRepo('');
     } catch (e) {
       setError(errorText(e));
@@ -128,7 +128,7 @@ function PluginsTab() {
   const removeMarketplace = (repo: string) =>
     Alert.alert('Remove marketplace?', `${repo}\nPlugins you installed from it stay installed.`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => updateSettings({ marketplaces: settings.marketplaces.filter((r) => r !== repo) }) },
+      { text: 'Remove', style: 'destructive', onPress: () => updateSettings((s) => ({ marketplaces: s.marketplaces.filter((r) => r !== repo) })) },
     ]);
 
   if (open) {

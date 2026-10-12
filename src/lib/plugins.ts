@@ -121,13 +121,27 @@ function splitArgs(args: string): string[] {
   return out;
 }
 
-/** Expands a command body: $ARGUMENTS → all args, $1…$9 → positional args. */
+/**
+ * Expands a command body like Claude Code: $ARGUMENTS → all args, $ARGUMENTS[N] and $N → the
+ * 0-based Nth arg. An indexed placeholder with no arg at its position stays as literal text.
+ */
 export function expandCommand(cmd: PluginCommand, args: string): string {
-  const positional = splitArgs(args);
-  let body = cmd.content.replace(/\$ARGUMENTS\b/g, args.trim()).replace(/\$([1-9])\b/g, (_m, n) => positional[Number(n) - 1] ?? '');
-  // A command that never mentions its arguments still gets them, appended.
-  if (args.trim() && !/\$ARGUMENTS\b|\$[1-9]\b/.test(cmd.content)) body += `\n\n${args.trim()}`;
-  return body.trim();
+  const all = args.trim();
+  const positional = splitArgs(all);
+  let received = false;
+  // One pass with a function replacer: what the user typed is never re-scanned or read as `$&`.
+  const body = cmd.content.replace(/\$ARGUMENTS\[(\d+)\]|\$ARGUMENTS\b|\$(\d+)\b/g, (m, idx?: string, n?: string) => {
+    if (idx === undefined && n === undefined) {
+      received = true;
+      return all;
+    }
+    const v = positional[Number(idx ?? n)];
+    if (v === undefined) return m;
+    received = true;
+    return v;
+  });
+  // Arguments no placeholder received are still passed on, appended.
+  return (all && !received ? `${body.trim()}\n\nARGUMENTS: ${all}` : body).trim();
 }
 
 /**
