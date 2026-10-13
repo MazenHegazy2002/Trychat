@@ -103,7 +103,10 @@ export default function ChatScreen() {
       const a = await voiceAttachment(uri, durationMs);
       let text: string;
       try {
-        text = await transcribeVoice(store.settings, a);
+        const result = await transcribeVoice(store.settings, a);
+        text = result.text;
+        // Remember a model the server accepted so the next voice note uses it straight away.
+        if (result.model !== (store.settings.transcriptionModel || 'whisper-1')) store.updateSettings({ transcriptionModel: result.model });
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e);
         a.voice = { durationMs, transcriptError: reason };

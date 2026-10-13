@@ -7,7 +7,7 @@ import { Platform } from 'react-native';
 
 import type { ApiContentPart } from './api';
 import { uid } from './id';
-import { transcribeAudio } from './transcribe';
+import { transcribeWithFallback } from './transcribe';
 import type { Attachment, ChatMessage, Settings } from './types';
 
 /**
@@ -176,9 +176,9 @@ export async function voiceAttachment(uri: string, durationMs: number): Promise<
 }
 
 /** Transcribes a voice note with the server's `/audio/transcriptions`. Rejects with a short reason. */
-export async function transcribeVoice(settings: Settings, a: Attachment): Promise<string> {
+export async function transcribeVoice(settings: Settings, a: Attachment): Promise<{ text: string; model: string }> {
   const bytes = new Uint8Array(await new File(a.uri).arrayBuffer());
-  return transcribeAudio(
+  return transcribeWithFallback(
     { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.transcriptionModel },
     bytes,
     'voice.m4a',

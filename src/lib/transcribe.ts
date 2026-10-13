@@ -66,9 +66,47 @@ export async function transcribeAudio(
   if (!res.ok) {
     if (res.status === 404 || res.status === 405) throw new Error(`HTTP ${res.status} (server has no /audio/transcriptions)`);
     const msg = typeof json?.error === 'string' ? json.error : (json?.error?.message ?? json?.message ?? raw);
-    throw new Error(`HTTP ${res.status}${msg ? `: ${msg.slice(0, 160)}` : ''}`);
+    throw Object.assign(new Error(`HTTP ${res.status}${msg ? `: ${msg.slice(0, 160)}` : ''}`), { status: res.status, detail: msg });
   }
   const text = (json ? json.text : raw)?.trim();
   if (!text) throw new Error('empty transcript');
   return text;
+}
+
+/** Model ids an error message suggests instead, e.g. "…lists this model as nanogpt/whisper-1, openrouter/openai/whisper-1". */
+export function suggestedModels(detail: string): string[] {
+  const after = detail.match(/(?:lists? this model as|try|available(?: models)?:?)\s+(.+)/i)?.[1] ?? '';
+  return [...new Set(after.split(/,|\bor\b/).map((x) => x.trim().replace(/[.;)"'`]+$/, '').replace(/^["'`]/, '')).filter((x) => /^[\w.-]+(\/[\w.-]+)*$/.test(x)))];
+}
+
+/**
+ * Like transcribeAudio, but when the server rejects the model and names alternatives (or a 400/422 says the
+ * model isn't available), tries those and a few common ids. Resolves with the transcript and the model that worked.
+ */
+export async function transcribeWithFallback(
+  target: TranscriptionTarget,
+  audio: Uint8Array,
+  fileName: string,
+  mimeType: string,
+  fetchFn: FetchLike,
+): Promise<{ text: string; model: string }> {
+  const first = target.model?.trim() || DEFAULT_TRANSCRIPTION_MODEL;
+  const queue = [first];
+  const tried = new Set<string>();
+  let lastError: unknown;
+  while (queue.length && tried.size < 6) {
+    const model = queue.shift()!;
+    if (tried.has(model)) continue;
+    tried.add(model);
+    try {
+      return { text: await transcribeAudio({ ...target, model }, audio, fileName, mimeType, fetchFn), model };
+    } catch (e: any) {
+      lastError = e;
+      if (e?.status !== 400 && e?.status !== 422 && e?.status !== 404) throw e;
+      if (e?.status === 404 && /no \/audio\/transcriptions/.test(e.message)) throw e;
+      queue.push(...suggestedModels(String(e?.detail ?? e?.message ?? '')));
+      if (tried.size === 1) queue.push('openai/whisper-1', 'openrouter/openai/whisper-1', 'gpt-4o-mini-transcribe');
+    }
+  }
+  throw lastError;
 }
