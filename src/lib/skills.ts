@@ -1,21 +1,20 @@
+import { parseGithubLink } from './githubLink';
 import { uid } from './id';
+import { listGithubLink, parseFrontmatter } from './pluginInstaller';
+import type { FrontmatterValue } from './pluginInstaller';
 import type { Skill } from './types';
 
-/** Reads "name:" and "description:" from SKILL.md front matter (--- … ---). */
+export { parseGithubLink };
+
+const fmText = (v: FrontmatterValue | undefined) => (Array.isArray(v) ? v.join(', ') : (v ?? '')).trim();
+
+/** Reads "name:" and "description:" from SKILL.md front matter (--- … ---), with the plugin installer's YAML subset. */
 export function parseSkillMarkdown(md: string, fallbackName: string): Omit<Skill, 'id' | 'updatedAt' | 'enabled'> {
-  const fm = md.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
-  const meta: Record<string, string> = {};
-  if (fm) {
-    for (const line of fm[1].split('\n')) {
-      const m = line.match(/^(\w[\w-]*):\s*(.*)$/);
-      if (m) meta[m[1]] = m[2].replace(/^["']|["']$/g, '').trim();
-    }
-  }
-  const body = fm ? md.slice(fm[0].length) : md;
+  const { data, body } = parseFrontmatter(md);
   const heading = body.match(/^#\s+(.+)$/m)?.[1];
   return {
-    name: meta.name || heading || fallbackName,
-    description: meta.description || body.replace(/^#.*$/m, '').trim().split('\n')[0].slice(0, 200),
+    name: fmText(data.name) || heading || fallbackName,
+    description: fmText(data.description) || body.replace(/^#.*$/m, '').trim().split('\n')[0].slice(0, 200),
     instructions: body.trim(),
   };
 }
@@ -30,48 +29,10 @@ export interface SkillCandidate {
   isSkillFile: boolean;
 }
 
-interface RepoRef {
-  owner: string;
-  repo: string;
-  branch?: string;
-  path: string;
-  /** Set when the link points at one file. */
-  file?: string;
-}
-
 const IGNORED_MD = /^(readme|license|licence|contributing|changelog|code_of_conduct|security|support|history|authors)(\.[\w-]+)?\.md$/i;
 
-/** Understands github.com links (repo, folder, file, with or without .git), raw links, and "owner/repo". */
-export function parseGithubLink(input: string): RepoRef | null {
-  const u = input.trim().replace(/[?#].*$/, '').replace(/\/+$/, '');
-  const raw = u.match(/^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/);
-  if (raw) return { owner: raw[1], repo: raw[2], branch: raw[3], path: '', file: raw[4] };
-  const m = u.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/(blob|tree)\/([^/]+)(?:\/(.*))?)?$/);
-  if (m) {
-    const [, owner, repo, kind, branch, path = ''] = m;
-    if (kind === 'blob') return { owner, repo, branch, path: '', file: path };
-    return { owner, repo, branch, path };
-  }
-  const short = u.match(/^([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
-  if (short) return { owner: short[1], repo: short[2], path: '' };
-  return null;
-}
-
-async function gh(path: string, token?: string) {
-  const res = await fetch(`https://api.github.com${path}`, {
-    headers: { Accept: 'application/vnd.github+json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-  });
-  const json = await res.json().catch(() => null);
-  if (res.status === 404) throw new Error('Repository not found. Check the link (private repos need a GitHub token in Connections).');
-  if (res.status === 403 && /rate limit/i.test(json?.message ?? '')) {
-    throw new Error('GitHub’s limit for anonymous requests was reached. Add a GitHub token in Settings → Connections, or try again later.');
-  }
-  if (!res.ok) throw new Error(`GitHub ${res.status}: ${json?.message ?? res.statusText}`);
-  return json;
-}
-
-const rawUrl = (r: RepoRef, branch: string, path: string) =>
-  `https://raw.githubusercontent.com/${r.owner}/${r.repo}/${branch}/${path.split('/').map(encodeURIComponent).join('/')}`;
+const rawUrl = (owner: string, repo: string, branch: string, path: string) =>
+  `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path.split('/').map(encodeURIComponent).join('/')}`;
 
 function nameFromPath(path: string): string {
   const parts = path.split('/');
@@ -80,31 +41,43 @@ function nameFromPath(path: string): string {
   return base.replace(/[-_]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 }
 
+/** GitHub links in a README ("https://github.com/owner/repo[/tree/…]") that look like skills or plugins. */
+function linkedSkillRepos(readme: string, self: string): string[] {
+  const out = new Map<string, string>();
+  for (const m of readme.matchAll(/https?:\/\/(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+)((?:\/(?:tree|blob)\/[^\s)"'<>\]]*)?)/gi)) {
+    const full = `${m[1]}/${m[2].replace(/\.git$/i, '')}`;
+    if (full.toLowerCase() === self.toLowerCase() || /^(user-attachments|orgs|sponsors|topics|apps|features|marketplace)$/i.test(m[1])) continue;
+    const url = `https://github.com/${full}${m[3].replace(/[.,;:]+$/, '')}`;
+    if (/skill|plugin|claude|marketplace/i.test(url) && !out.has(full.toLowerCase())) out.set(full.toLowerCase(), url);
+  }
+  return [...out.values()].slice(0, 20);
+}
+
+/** Links findSkills suggests when a repo has no skills (empty for other errors). */
+export const skillSuggestions = (e: unknown): string[] => {
+  const s = e instanceof Error ? (e as Error & { suggestions?: unknown }).suggestions : undefined;
+  return Array.isArray(s) ? s.filter((x): x is string => typeof x === 'string') : [];
+};
+
 /**
  * Finds skills in a GitHub link: every SKILL.md in the repo (or the linked folder). If there are none,
- * other Markdown files are offered instead, and finally the README.
+ * other Markdown files are offered instead, and finally a README that has skill front matter. A README
+ * without it (an "awesome list") isn't a skill: the error carries the skill/plugin repos it links to
+ * (see skillSuggestions).
  */
 export async function findSkills(link: string, githubToken?: string): Promise<SkillCandidate[]> {
-  const ref = parseGithubLink(link);
-  if (!ref) throw new Error('Paste a GitHub link, e.g. https://github.com/owner/repo or a link to a SKILL.md.');
-  const branch = ref.branch ?? (await gh(`/repos/${ref.owner}/${ref.repo}`, githubToken)).default_branch;
-
-  if (ref.file) {
-    return [{ name: nameFromPath(ref.file), path: ref.file, rawUrl: rawUrl(ref, branch, ref.file), isSkillFile: /skill\.md$/i.test(ref.file) }];
-  }
-
-  const tree = await gh(`/repos/${ref.owner}/${ref.repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`, githubToken);
-  const prefix = ref.path ? `${ref.path}/` : '';
-  const files: string[] = (tree.tree ?? [])
-    .filter((t: { type: string; path: string }) => t.type === 'blob' && t.path.startsWith(prefix))
-    .map((t: { path: string }) => t.path);
-  const toCandidate = (path: string, isSkillFile: boolean): SkillCandidate => ({
-    name: nameFromPath(path),
-    path,
-    rawUrl: rawUrl(ref, branch, path),
+  if (!parseGithubLink(link)) throw new Error('Paste a GitHub link, e.g. https://github.com/owner/repo or a link to a SKILL.md.');
+  const { owner, repo, ref: branch, path, file, files: all } = await listGithubLink(link, githubToken);
+  const toCandidate = (p: string, isSkillFile: boolean): SkillCandidate => ({
+    name: nameFromPath(p),
+    path: p,
+    rawUrl: rawUrl(owner, repo, branch, p),
     isSkillFile,
   });
+  if (file) return [toCandidate(file, /skill\.md$/i.test(file))];
 
+  const prefix = path ? `${path}/` : '';
+  const files = all.filter((f) => f.startsWith(prefix)).sort();
   const skillFiles = files.filter((f) => /(^|\/)skill\.md$/i.test(f));
   if (skillFiles.length) return skillFiles.slice(0, 300).map((f) => toCandidate(f, true));
 
@@ -112,8 +85,21 @@ export async function findSkills(link: string, githubToken?: string): Promise<Sk
   if (markdown.length) return markdown.slice(0, 300).map((f) => toCandidate(f, false));
 
   const readme = files.find((f) => f.slice(prefix.length).toLowerCase() === 'readme.md');
-  if (readme) return [toCandidate(readme, false)];
-  throw new Error('No SKILL.md or Markdown files found there.');
+  if (!readme) throw new Error('No SKILL.md or Markdown files found there.');
+  const candidate = toCandidate(readme, false);
+  const res = await fetch(candidate.rawUrl, { headers: githubToken ? { Authorization: `Bearer ${githubToken}` } : {} });
+  const text = res.ok ? await res.text() : '';
+  const { data } = parseFrontmatter(text);
+  if (fmText(data.name) || fmText(data.description)) return [candidate];
+  const suggestions = linkedSkillRepos(text, `${owner}/${repo}`);
+  throw Object.assign(
+    new Error(
+      `${owner}/${repo} has no skills: no SKILL.md files, and its README is a page of links, not a skill.${
+        suggestions.length ? ` It links to ${suggestions.length === 1 ? 'a repo that looks' : `${suggestions.length} repos that look`} like skills or plugins:` : ''
+      }`,
+    ),
+    { suggestions },
+  );
 }
 
 /** Downloads one candidate and turns it into a skill. */

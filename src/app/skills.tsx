@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel } from '../components/ui';
 import { uid } from '../lib/id';
-import { findSkills, importSkill, STARTER_SKILLS } from '../lib/skills';
+import { findSkills, importSkill, skillSuggestions, STARTER_SKILLS } from '../lib/skills';
 import type { SkillCandidate } from '../lib/skills';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
@@ -22,6 +22,8 @@ export default function SkillsScreen() {
   const [importUrl, setImportUrl] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
+  /** Skill/plugin repos linked from a README-only repo, offered when it has no skills. */
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   /** Skills found in a repo, waiting for the user to choose which to import. */
   const [found, setFound] = useState<SkillCandidate[] | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
@@ -32,6 +34,7 @@ export default function SkillsScreen() {
   const doImport = async () => {
     setImporting(true);
     setImportError('');
+    setSuggestions([]);
     try {
       const candidates = await findSkills(importUrl, settings.githubToken);
       if (candidates.length === 1) {
@@ -46,6 +49,7 @@ export default function SkillsScreen() {
       }
     } catch (e) {
       setImportError(e instanceof Error ? e.message : String(e));
+      setSuggestions(skillSuggestions(e));
     } finally {
       setImporting(false);
     }
@@ -135,6 +139,29 @@ export default function SkillsScreen() {
           <PillButton title="Import" onPress={doImport} loading={importing} disabled={!importUrl.trim()} />
         </View>
         {!!importError && <Text style={{ color: theme.danger, marginTop: 8 }}>{importError}</Text>}
+        {suggestions.length > 0 && (
+          <Card style={{ marginTop: 8 }}>
+            {suggestions.map((url, i) => (
+              <View key={url}>
+                {i > 0 && <Divider />}
+                <Pressable
+                  onPress={() => {
+                    setImportUrl(url);
+                    setImportError('');
+                    setSuggestions([]);
+                  }}
+                  style={styles.row}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use ${url}`}
+                >
+                  <Text style={{ flex: 1, color: theme.primary, fontSize: 14 }} numberOfLines={1}>
+                    {url.replace(/^https:\/\/github\.com\//, '')}
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+          </Card>
+        )}
 
         {starters.length > 0 && (
           <>

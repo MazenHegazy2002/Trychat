@@ -169,7 +169,8 @@ function PluginsTab({ browser }: { browser: MarketplaceBrowser }) {
   const addMarketplace = async () => {
     const ref = parseGithubLink(newRepo);
     if (!ref) return setError('Enter a GitHub repo like owner/repo.');
-    const repo = `${ref.owner}/${ref.repo}`;
+    // Keep a pinned ref (owner/repo#v1, owner/repo@v1): dropping it would list the default branch instead.
+    const repo = `${ref.owner}/${ref.repo}${ref.branch ? `#${ref.branch}` : ''}`;
     setAdding(true);
     setError('');
     try {

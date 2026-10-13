@@ -6,8 +6,9 @@ import type {
   PluginMcpServer,
   PluginSkill,
 } from './types';
+import { githubRefSplits, parseGithubLink } from './githubLink';
+import type { RepoRef } from './githubLink';
 import { secretsToKeep } from './plugins';
-import { parseGithubLink } from './skills';
 
 /**
  * Installs Claude Code–format plugins and marketplaces from GitHub.
@@ -28,7 +29,9 @@ import { parseGithubLink } from './skills';
  * or archive/npm/command (unsupported on mobile).
  *
  * GitHub access: one GET /repos/{o}/{r} (default branch) and one recursive tree listing per repo+ref,
- * then file contents from raw.githubusercontent.com, at most 6 downloads at a time.
+ * kept for the session (CACHE_MS), then file contents from raw.githubusercontent.com, at most 6
+ * downloads at a time. Symlinks inside the repo are followed (one raw download of the link each).
+ * Links may pin a ref: owner/repo#ref, owner/repo@ref, …/tree/<branch with slashes>/path.
  */
 
 export interface MarketplaceEntry {
@@ -65,8 +68,12 @@ export type InstallTarget = { kind: 'plugin'; plugin: Plugin } | { kind: 'market
 
 /** Files bigger than this are skipped (and listed as skipped). */
 export const MAX_FILE_BYTES = 200 * 1024;
+/** marketplace.json is a catalog, not a component: claude-plugins-community's lists thousands of plugins (1.5 MB+). */
+export const MAX_MARKETPLACE_BYTES = 10 * 1024 * 1024;
 /** At most this many skills, commands and agents (each) per plugin. */
 export const MAX_ITEMS = 200;
+/** At most this many symlinks are followed per repo listing (each costs one small download). */
+const MAX_LINKS = 50;
 /** Parallel raw-file downloads. */
 const CONCURRENCY = 6;
 /** A plugin is stored and synced as one item: all its text together may not exceed this. */
@@ -99,6 +106,24 @@ const toArray = (v: unknown): unknown[] => (v === undefined || v === null ? [] :
 const strings = (v: unknown): string[] => toArray(v).filter((x): x is string => typeof x === 'string' && !!x.trim());
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const sizeLabel = (bytes: number) => (bytes >= 1024 * 1024 ? `${bytes / (1024 * 1024)} MB` : `${Math.round(bytes / 1024)} KB`);
+
+/** True when `text` is over `max` bytes as UTF-8 (GitHub's sizes are bytes; a JS string length counts UTF-16 units). */
+function overBytes(text: string, max: number): boolean {
+  if (text.length > max) return true;
+  if (text.length * 3 <= max) return false;
+  let n = 0;
+  for (let i = 0; i < text.length && n <= max; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+      n += 4;
+      i++;
+    } else n += 3;
+  }
+  return n > max;
+}
 
 /** Name usable in "/plugin:command" and "plugin:skill" (letters, digits, _ . -; at most MAX_NAME characters). */
 function slug(name: string | undefined, lower = false): string | undefined {
@@ -141,6 +166,17 @@ function joinPath(...parts: string[]): string {
   return out.join('/');
 }
 
+/** Resolves "." and ".." in a repo path; null when it climbs above the repo root. */
+function normalizePath(p: string): string | null {
+  const out: string[] = [];
+  for (const seg of p.split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg !== '..') out.push(seg);
+    else if (!out.pop()) return null;
+  }
+  return out.join('/');
+}
+
 const dirname = (p: string) => p.split('/').slice(0, -1).join('/');
 const basename = (p: string) => p.split('/').pop() ?? '';
 const isUnder = (dir: string, path: string) => !dir || path.startsWith(`${dir}/`);
@@ -177,6 +213,12 @@ interface RepoTree {
   truncated: boolean;
   /** Folders listed separately after truncation. */
   filled: Set<string>;
+  /** Symlinks (mode 120000). They aren't in `files`; resolveLinks adds what they point to. */
+  links: Set<string>;
+  /** Files and links seen through a followed symlink → their real path (what raw.githubusercontent.com serves). */
+  aliases: Map<string, string>;
+  /** Symlinks already handled → "" when followed, else why not. */
+  linkNotes: Map<string, string>;
 }
 
 const hasFile = (t: RepoTree, p: string) => t.files.has(p);
@@ -199,8 +241,8 @@ function findFileCaseless(t: RepoTree, dir: string, file: string): string | unde
 
 interface Ctx {
   tree(owner: string, repo: string, ref?: string): Promise<RepoTree>;
-  /** File contents, or null when the file is over MAX_FILE_BYTES. */
-  read(tree: RepoTree, path: string): Promise<string | null>;
+  /** File contents, or null when the file is over `maxBytes` (default MAX_FILE_BYTES). Reads a symlinked path from its target. */
+  read(tree: RepoTree, path: string, maxBytes?: number): Promise<string | null>;
   /** When the repo listing was truncated, lists `path` on its own so the plugin there is complete. */
   fill(tree: RepoTree, path: string): Promise<void>;
 }
@@ -211,7 +253,8 @@ function addTreeItems(tree: RepoTree, items: unknown[], prefix: string) {
     if (!isObj(item) || typeof item.path !== 'string') continue;
     const path = prefix ? `${prefix}/${item.path}` : item.path;
     if (item.type === 'blob') {
-      tree.files.set(path, typeof item.size === 'number' ? item.size : 0);
+      if (item.mode === '120000') tree.links.add(path);
+      else tree.files.set(path, typeof item.size === 'number' ? item.size : 0);
       const parts = path.split('/');
       for (let i = 1; i < parts.length; i++) tree.dirs.add(parts.slice(0, i).join('/'));
     } else if (item.type === 'tree') {
@@ -246,7 +289,7 @@ async function httpError(res: Response, token: string | undefined, notFound: str
     return rateLimitError(token);
   }
   if (res.status === 401) return new Error('GitHub didn’t accept your token. Update it in Settings → Connections.');
-  if (res.status === 404) return new Error(notFound);
+  if (res.status === 404) return Object.assign(new Error(notFound), { status: 404 });
   if (res.status === 403) return new Error(`GitHub refused access${message ? `: ${message}` : ''}.`);
   return new Error(`GitHub error ${res.status}${message ? `: ${message}` : ''}.`);
 }
@@ -268,11 +311,43 @@ function createLimiter(max: number) {
   };
 }
 
+const isNotFound = (e: unknown) => isObj(e) && e.status === 404;
+
+/**
+ * Default branches and repo listings are kept for the session (CACHE_MS), so opening a marketplace and
+ * installing from it costs one API request per repo, not one per install: GitHub allows 60 an hour
+ * without a token. Failed lookups aren't kept.
+ */
+const CACHE_MS = 10 * 60 * 1000;
+const MAX_CACHED_TREES = 12;
+const sessionBranches = new Map<string, { at: number; value: Promise<string> }>();
+const sessionTrees = new Map<string, { at: number; value: Promise<RepoTree> }>();
+
+function cached<T>(map: Map<string, { at: number; value: Promise<T> }>, key: string, load: () => Promise<T>): Promise<T> {
+  const hit = map.get(key);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
+  const value = load();
+  map.delete(key);
+  map.set(key, { at: Date.now(), value });
+  value.catch(() => {
+    if (map.get(key)?.value === value) map.delete(key);
+  });
+  for (const k of map.keys()) {
+    if (map.size <= MAX_CACHED_TREES) break;
+    map.delete(k);
+  }
+  return value;
+}
+
+/** Forgets cached repo listings (e.g. to pick up a plugin that was just pushed). */
+export function clearGithubCache() {
+  sessionBranches.clear();
+  sessionTrees.clear();
+}
+
 function createCtx(token?: string): Ctx {
   const limit = createLimiter(CONCURRENCY);
   const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-  const branches = new Map<string, Promise<string>>();
-  const trees = new Map<string, Promise<RepoTree>>();
   const texts = new Map<string, Promise<string | null>>();
 
   async function request(url: string, headers: Record<string, string>, notFound: string): Promise<Response> {
@@ -299,17 +374,13 @@ function createCtx(token?: string): Ctx {
     `Repository ${owner}/${repo} wasn’t found. Check the link (private repos need a GitHub token in Settings → Connections).`;
 
   function defaultBranch(owner: string, repo: string): Promise<string> {
-    const key = `${owner}/${repo}`.toLowerCase();
-    let p = branches.get(key);
-    if (!p) {
-      p = api(`/repos/${owner}/${repo}`, repoNotFound(owner, repo)).then((json) => {
+    return cached(sessionBranches, `${owner}/${repo}`.toLowerCase(), () =>
+      api(`/repos/${owner}/${repo}`, repoNotFound(owner, repo)).then((json) => {
         const branch = isObj(json) ? str(json.default_branch) : undefined;
         if (!branch) throw new Error(`Couldn’t find the default branch of ${owner}/${repo}.`);
         return branch;
-      });
-      branches.set(key, p);
-    }
-    return p;
+      }),
+    );
   }
 
   const refNotFound = (owner: string, repo: string, ref: string) =>
@@ -326,6 +397,9 @@ function createCtx(token?: string): Ctx {
       dirs: new Set(),
       truncated: isObj(json) && json.truncated === true,
       filled: new Set(),
+      links: new Set(),
+      aliases: new Map(),
+      linkNotes: new Map(),
     };
     addTreeItems(tree, treeItems(json), '');
     return tree;
@@ -352,33 +426,28 @@ function createCtx(token?: string): Ctx {
   return {
     async tree(owner, repo, ref) {
       const r = ref || (await defaultBranch(owner, repo));
-      const key = `${owner}/${repo}@${r}`.toLowerCase();
-      let p = trees.get(key);
-      if (!p) {
-        p = loadTree(owner, repo, r);
-        trees.set(key, p);
-      }
-      return p;
+      return cached(sessionTrees, `${owner}/${repo}@${r}`.toLowerCase(), () => loadTree(owner, repo, r));
     },
     async fill(tree, path) {
       if (!tree.truncated || !path || tree.filled.has(path)) return;
       tree.filled.add(path);
       await fillTree(tree, path);
     },
-    read(tree, path) {
+    read(tree, path, maxBytes = MAX_FILE_BYTES) {
       const size = tree.files.get(path);
-      if (size !== undefined && size > MAX_FILE_BYTES) return Promise.resolve(null);
-      const key = `${tree.owner}/${tree.repo}@${tree.ref}:${path}`.toLowerCase();
+      if (size !== undefined && size > maxBytes) return Promise.resolve(null);
+      const real = tree.aliases.get(path) ?? path;
+      const key = `${tree.owner}/${tree.repo}@${tree.ref}:${real}${maxBytes === MAX_FILE_BYTES ? '' : `#${maxBytes}`}`.toLowerCase();
       let p = texts.get(key);
       if (!p) {
         const url = `https://raw.githubusercontent.com/${tree.owner}/${tree.repo}/${tree.ref
           .split('/')
           .map(encodeURIComponent)
-          .join('/')}/${path.split('/').map(encodeURIComponent).join('/')}`;
+          .join('/')}/${real.split('/').map(encodeURIComponent).join('/')}`;
         p = limit(async () => {
           const res = await request(url, auth, `Couldn’t download ${path} from ${tree.owner}/${tree.repo} (not found).`);
           const text = await res.text();
-          return text.length > MAX_FILE_BYTES ? null : text;
+          return overBytes(text, maxBytes) ? null : text;
         });
         texts.set(key, p);
       }
@@ -387,14 +456,86 @@ function createCtx(token?: string): Ctx {
   };
 }
 
-async function readJson(ctx: Ctx, tree: RepoTree, path: string): Promise<unknown> {
-  const text = await ctx.read(tree, path);
-  if (text === null) throw new Error(`${path} is too large (over 200 KB).`);
+async function readJson(ctx: Ctx, tree: RepoTree, path: string, maxBytes = MAX_FILE_BYTES): Promise<unknown> {
+  const text = await ctx.read(tree, path, maxBytes);
+  if (text === null) throw new Error(`${path} is too large (over ${sizeLabel(maxBytes)}).`);
   try {
     return JSON.parse(text.replace(/^﻿/, ''));
   } catch (e) {
     throw new Error(`${path} isn’t valid JSON (${errorMessage(e)}).`);
   }
+}
+
+/**
+ * Follows the symlinks under `dir` like Claude Code does when it copies a plugin: a link to a file or
+ * folder elsewhere in the repo shows the target's files at the link's path (downloaded from the target);
+ * a link that leaves the repo, contains itself or goes nowhere is skipped, with the reason in linkNotes.
+ * GitHub lists a link as a blob whose content (one raw download) is the target path.
+ */
+async function resolveLinks(ctx: Ctx, tree: RepoTree, dir: string): Promise<void> {
+  const want = new Set([...tree.links].filter((l) => isUnder(dir, l) && !tree.linkNotes.has(l)));
+  // Several rounds: links inside a linked folder, and links to links.
+  for (let round = 0; round < 5 && want.size; round++) {
+    const pending = [...want].filter((l) => !tree.linkNotes.has(l));
+    want.clear();
+    const room = Math.max(0, MAX_LINKS - tree.linkNotes.size);
+    for (const link of pending.slice(room)) tree.linkNotes.set(link, `wasn’t followed (over ${MAX_LINKS} symlinks)`);
+    const batch = pending.slice(0, room);
+    const texts = await Promise.all(batch.map((l) => ctx.read(tree, l).catch(() => null)));
+    for (let i = 0; i < batch.length; i++) {
+      const link = batch[i];
+      const text = texts[i]?.trim() ?? '';
+      if (!text || text.includes('\n')) {
+        tree.linkNotes.set(link, 'couldn’t be read');
+        continue;
+      }
+      // Relative to where git stores the link, which differs from `link` inside a linked folder.
+      const target = text.startsWith('/') ? null : normalizePath(`${dirname(tree.aliases.get(link) ?? link)}/${text}`);
+      if (target === null) {
+        tree.linkNotes.set(link, 'points outside the repository');
+        continue;
+      }
+      if (target === link || isUnder(target, link)) {
+        tree.linkNotes.set(link, 'points to a folder that contains it');
+        continue;
+      }
+      if (tree.links.has(target) && !tree.linkNotes.has(target)) {
+        want.add(target);
+        want.add(link);
+        continue;
+      }
+      if (tree.truncated && !tree.files.has(target) && !hasDir(tree, target)) await ctx.fill(tree, target);
+      const size = tree.files.get(target);
+      if (size !== undefined) {
+        tree.files.set(link, size);
+        tree.aliases.set(link, tree.aliases.get(target) ?? target);
+        tree.linkNotes.set(link, '');
+        continue;
+      }
+      if (!hasDir(tree, target)) {
+        tree.linkNotes.set(link, `points to ${text}, which isn’t in the repository`);
+        continue;
+      }
+      const mirrored = (p: string) => `${link}/${relTo(target, p)}`;
+      tree.dirs.add(link);
+      for (const d of [...tree.dirs]) if (isUnder(target, d)) tree.dirs.add(mirrored(d));
+      for (const f of filesUnder(tree, target)) {
+        tree.files.set(mirrored(f), tree.files.get(f) ?? 0);
+        tree.aliases.set(mirrored(f), tree.aliases.get(f) ?? f);
+      }
+      for (const l of [...tree.links]) {
+        if (!isUnder(target, l)) continue;
+        const v = mirrored(l);
+        tree.links.add(v);
+        tree.aliases.set(v, tree.aliases.get(l) ?? l);
+        const note = tree.linkNotes.get(l);
+        if (note !== undefined) tree.linkNotes.set(v, note);
+        else want.add(v);
+      }
+      tree.linkNotes.set(link, '');
+    }
+  }
+  for (const link of want) if (!tree.linkNotes.has(link)) tree.linkNotes.set(link, 'is a loop of symlinks');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -557,7 +698,10 @@ export function parseFrontmatter(md: string): Frontmatter {
       if (items.length && items.every((l) => /^-(\s|$)/.test(l))) {
         data[key] = items.map((l) => unquote(l.replace(/^-\s*/, ''))).filter(Boolean);
       } else if (items.length && !items.some((l) => /^[\w.-]+\s*:(\s|$)/.test(l))) {
-        data[key] = foldLines(cont);
+        // A quoted value may start on the line after its key.
+        const folded = foldLines(cont);
+        const quoted = /^\s*["']/.test(folded) ? readQuoted(folded.trimStart()) : null;
+        data[key] = quoted ? quoted.value : folded;
       } else {
         data[key] = '';
       }
@@ -633,18 +777,30 @@ function parseUserConfig(value: unknown): PluginConfigField[] {
   return fields;
 }
 
+/** The entry fields strict mode is about: appended to plugin.json (strict) or a conflict with it (strict: false). */
+const ENTRY_COMPONENT_KEYS = ['commands', 'agents', 'skills', 'hooks', 'outputStyles', 'themes'] as const;
+/** Entry fields that override plugin.json's whatever `strict` says. */
+const ENTRY_DISPLAY_KEYS = ['displayName', 'description', 'author', 'homepage', 'repository', 'license', 'keywords', 'defaultEnabled'] as const;
+
+const entryDeclaresComponents = (entry: Obj) =>
+  ENTRY_COMPONENT_KEYS.some((k) => entry[k] !== undefined) || (isObj(entry.experimental) && entry.experimental.themes !== undefined);
+
 /**
- * Combines plugin.json and a marketplace entry. Without plugin.json the entry is the manifest.
- * strict (default): plugin.json wins for metadata and the entry's components are appended.
- * strict:false: the entry is the whole definition.
+ * Combines plugin.json and a marketplace entry like Claude Code. Without plugin.json the entry is the
+ * manifest. With it, plugin.json is the manifest: the entry's display fields and defaultEnabled override
+ * it, its version only fills in a missing one, and (strict, the default) its component fields are
+ * appended. Entry mcpServers, lspServers and userConfig don't apply.
  */
 function buildManifest(pj: Obj | undefined, entry: Obj | undefined, strict: boolean): Obj {
   if (!pj) return { ...(entry ?? {}) };
   if (!entry) return pj;
-  if (!strict) return { ...pj, ...entry };
-  const m: Obj = { ...entry, ...pj };
-  for (const k of COMPONENT_KEYS) {
-    if (k !== 'experimental' && pj[k] !== undefined && entry[k] !== undefined) m[k] = [...toArray(pj[k]), ...toArray(entry[k])];
+  const m: Obj = { ...pj };
+  for (const k of ENTRY_DISPLAY_KEYS) if (entry[k] !== undefined) m[k] = entry[k];
+  if (m.version === undefined && entry.version !== undefined) m.version = entry.version;
+  if (strict) {
+    for (const k of ENTRY_COMPONENT_KEYS) {
+      if (entry[k] !== undefined) m[k] = pj[k] === undefined ? entry[k] : [...toArray(pj[k]), ...toArray(entry[k])];
+    }
   }
   return m;
 }
@@ -663,6 +819,8 @@ interface ParseInput {
   idScope: string;
   marketplace?: string;
   source: string;
+  /** The entry's source is the marketplace folder itself ("./"): its `skills` replace the default skills/ scan. */
+  atMarketplaceRoot?: boolean;
 }
 
 interface CommandSpec {
@@ -690,6 +848,9 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
     return list.slice(0, MAX_ITEMS);
   };
 
+  await resolveLinks(ctx, tree, root);
+  for (const [link, why] of tree.linkNotes) if (why && isUnder(root, link)) notes.push(`Symlink ${relTo(root, link)} ${why}`);
+
   // --- Manifest -------------------------------------------------------------------------------
   const pjPath = at('.claude-plugin/plugin.json');
   let pj: Obj | undefined;
@@ -699,21 +860,23 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
     pj = json;
   }
   const strict = entry?.strict !== false;
-  if (entry && pj && !strict && declaresComponents(pj)) {
+  if (entry && pj && !strict && entryDeclaresComponents(entry)) {
     throw new Error(
-      `“${str(entry.name) ?? input.fallbackName}” can’t be installed: its marketplace entry sets strict: false (the entry defines the plugin), but ${pjPath} also declares components. The plugin author needs to keep only one of them.`,
+      `“${str(entry.name) ?? input.fallbackName}” can’t be installed: its marketplace entry sets strict: false and lists components, but the plugin also has ${pjPath} (conflicting manifests). The plugin author needs to keep only one of them.`,
     );
   }
   const m = buildManifest(pj, entry, strict);
   const name = slug(input.fixedName) ?? slug(str(m.name)) ?? slug(input.fallbackName, true) ?? 'plugin';
 
-  // --- Skills: skills/ (always) + manifest paths; a lone root SKILL.md is one skill -------------
+  // --- Skills: skills/<name>/SKILL.md + manifest paths; a lone root SKILL.md is one skill ------
+  // An entry at the marketplace root that lists skills loads only those (skills/ isn't scanned).
   const skillFiles: string[] = [];
   const addSkill = (p: string) => {
     if (!skillFiles.includes(p)) skillFiles.push(p);
   };
+  const skillsIn = (dir: string) => filesUnder(tree, dir).filter((f) => isSkillMd(f) && relTo(dir, f).split('/').length === 2);
   const skillsDir = at('skills');
-  filesUnder(tree, skillsDir).filter(isSkillMd).forEach(addSkill);
+  if (!(input.atMarketplaceRoot && entry?.skills !== undefined)) skillsIn(skillsDir).forEach(addSkill);
   for (const p of strings(m.skills)) {
     const dir = pluginPath(root, p);
     const direct = hasFile(tree, dir) && isSkillMd(dir) ? dir : findFileCaseless(tree, dir, 'SKILL.md');
@@ -721,9 +884,7 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
       addSkill(direct);
       continue;
     }
-    const all = filesUnder(tree, dir).filter(isSkillMd);
-    const oneLevel = all.filter((f) => relTo(dir, f).split('/').length === 2);
-    const found = oneLevel.length ? oneLevel : all;
+    const found = skillsIn(dir);
     if (!found.length) notes.push(`Skills not found at ${p}`);
     found.forEach(addSkill);
   }
@@ -820,7 +981,10 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
     if (text === null) return;
     const { data, body } = parseFrontmatter(text);
     const dir = dirname(path);
-    const skillName = fmString(data.name) ?? (dir === root ? name : basename(dir));
+    // "plugin:skill" in front matter already carries the plugin prefix; Claude Code doesn't add it twice.
+    const prefix = [name, str(pj?.name)].find((n) => n && fmString(data.name)?.startsWith(`${n}:`));
+    const skillName =
+      (prefix ? str(fmString(data.name)?.slice(prefix.length + 1)) : fmString(data.name)) ?? (dir === root ? name : basename(dir));
     if (skills.some((s) => s.name === skillName)) return;
     skills.push({ name: skillName, description: fmString(data.description) ?? firstLine(body), instructions: body.trim() });
   });
@@ -978,13 +1142,25 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
   if (filesUnder(tree, at('bin')).length) unsupported.push('Executables (bin/)');
   if (m.workflows !== undefined) unsupported.push('Workflows');
   const experimental = toArray(m.experimental).filter(isObj);
-  if (experimental.some((x) => x.themes !== undefined)) unsupported.push('Themes');
+  if (m.themes !== undefined || experimental.some((x) => x.themes !== undefined)) unsupported.push('Themes');
   if (experimental.some((x) => x.monitors !== undefined)) unsupported.push('Monitors');
+  const computerOnly = [...unsupported];
   if (skippedLarge) unsupported.push(`${plural(skippedLarge, 'file')} over 200 KB skipped`);
   unsupported.push(...notes);
 
-  const nothing = !skills.length && !commands.length && !agents.length && !mcpServers.length && !unsupported.length;
-  if (nothing && !pj && !declaresComponents(entry)) {
+  // Nothing a phone can use: refuse instead of installing an empty plugin.
+  if (!skills.length && !commands.length && !agents.length && !mcpServers.length) {
+    const label = `“${str(m.displayName) ?? name}”`;
+    if (computerOnly.length) {
+      throw new Error(
+        `${label} can’t be used on a phone: it only has ${computerOnly.join(', ')}, which need Claude Code on a computer.${notes.length ? ` (${notes.join('; ')})` : ''}`,
+      );
+    }
+    if (unsupported.length || pj || declaresComponents(entry)) {
+      throw new Error(
+        `${label} has no skills, commands, agents or remote MCP servers TryChat can use${unsupported.length ? ` (${unsupported.join('; ')})` : ''}.`,
+      );
+    }
     throw new Error(
       `No Claude Code plugin found in ${tree.owner}/${tree.repo}${root ? `/${root}` : ''}: no .claude-plugin/plugin.json, skills/, commands/, agents/ or .mcp.json.`,
     );
@@ -1074,9 +1250,9 @@ const OUTSIDE = 'Its folder is outside the marketplace (".." isn’t allowed).';
 function fromGitUrl(url: string, ref?: string): Resolved {
   const u = url.trim();
   if (u.length > MAX_LINE) return { reason: 'Its repository link is too long.' };
-  const ssh = u.match(/^(?:ssh:\/\/)?git@github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
-  if (ssh) return { target: { owner: ssh[1], repo: ssh[2], ref, path: '' } };
-  if (/^(?:https?:\/\/)?(?:www\.)?github\.com\//i.test(u) || /^[\w.-]+\/[\w.-]+$/.test(u)) {
+  const ssh = u.match(/^(?:ssh:\/\/)?git@github\.com[:/]([^/]+)\/([^/#]+?)(?:\.git)?\/?(?:#(.+))?$/i);
+  if (ssh) return { target: { owner: ssh[1], repo: ssh[2], ref: ref ?? ssh[3], path: '' } };
+  if (/^(?:https?:\/\/)?(?:www\.)?github\.com\//i.test(u) || /^[\w.-]+\/[\w.-]+(?:[#@]\S+)?$/.test(u)) {
     const p = parseGithubLink(u);
     if (p && !p.file) {
       if (hasDotDot(p.path)) return { reason: OUTSIDE };
@@ -1139,9 +1315,43 @@ function resolveSource(source: unknown, tree: RepoTree, dir: string, pluginRoot?
   }
 }
 
+/**
+ * For an entry whose folder is in the marketplace repo: the parts that need a computer, when the entry and
+ * the folder show nothing a phone can use (no plugin.json, .mcp.json, skills, commands, agents or remote
+ * MCP servers). Undefined when that can't be told without downloads; the install decides then.
+ */
+function computerOnlyEntry(tree: RepoTree, target: Target, e: Obj): string[] | undefined {
+  if (target.owner !== tree.owner || target.repo !== tree.repo || target.ref !== tree.ref) return undefined;
+  const at = (p: string) => joinPath(target.path, p);
+  if (
+    e.skills !== undefined ||
+    e.commands !== undefined ||
+    e.agents !== undefined ||
+    hasFile(tree, at('.claude-plugin/plugin.json')) ||
+    hasFile(tree, at('.mcp.json')) ||
+    findFileCaseless(tree, target.path, 'SKILL.md') ||
+    filesUnder(tree, at('skills')).some(isSkillMd) ||
+    filesUnder(tree, at('commands')).some(isMd) ||
+    filesUnder(tree, at('agents')).some(isMd)
+  ) {
+    return undefined;
+  }
+  const parts: string[] = [];
+  if (e.mcpServers !== undefined) {
+    const map = isObj(e.mcpServers) && isObj(e.mcpServers.mcpServers) ? e.mcpServers.mcpServers : e.mcpServers;
+    const servers = isObj(map) ? Object.values(map) : [];
+    if (!servers.length || servers.some((s) => !isObj(s) || s.url !== undefined)) return undefined;
+    parts.push('local MCP servers');
+  }
+  if (e.lspServers !== undefined || hasFile(tree, at('.lsp.json'))) parts.push('LSP servers');
+  if (e.hooks !== undefined || hasFile(tree, at('hooks/hooks.json'))) parts.push('hooks');
+  if (e.outputStyles !== undefined || hasDir(tree, at('output-styles'))) parts.push('output styles');
+  return parts.length ? parts : undefined;
+}
+
 async function readMarketplace(ctx: Ctx, tree: RepoTree, dir: string, source: string): Promise<MarketplaceInfo> {
   const path = joinPath(dir, '.claude-plugin/marketplace.json');
-  const json = await readJson(ctx, tree, path);
+  const json = await readJson(ctx, tree, path, MAX_MARKETPLACE_BYTES);
   if (!isObj(json)) throw new Error(`${path} should contain a JSON object.`);
   if (!Array.isArray(json.plugins)) throw new Error(`${path} has no "plugins" list.`);
   const metadata = isObj(json.metadata) ? json.metadata : {};
@@ -1166,6 +1376,11 @@ async function readMarketplace(ctx: Ctx, tree: RepoTree, dir: string, source: st
     if (version) entry.version = version;
     if (category) entry.category = category;
     if ('reason' in resolved) entry.reason = resolved.reason;
+    const computerOnly = 'target' in resolved ? computerOnlyEntry(tree, resolved.target, e) : undefined;
+    if (computerOnly) {
+      entry.supported = false;
+      entry.reason = `Needs Claude Code on a computer: it only has ${computerOnly.join(', ')}.`;
+    }
     entries.push(entry);
   }
   const info: MarketplaceInfo = { name: str(json.name) ?? tree.repo, source, repo: `${tree.owner}/${tree.repo}`, entries };
@@ -1188,6 +1403,10 @@ function entryRaw(entry: MarketplaceEntry): (EntryRaw & { target: Target }) | un
   };
 }
 
+/** A relative source naming the marketplace folder itself ("./", "."). */
+const isRootSource = (s: unknown) =>
+  typeof s === 'string' && !/^(https?:\/\/|git@|ssh:\/\/)/i.test(s.trim()) && !hasDotDot(s) && joinPath(s) === '';
+
 async function installEntry(ctx: Ctx, marketplace: MarketplaceInfo, entry: MarketplaceEntry): Promise<Plugin> {
   const raw = entryRaw(entry);
   if (!entry.supported || !raw) {
@@ -1208,6 +1427,7 @@ async function installEntry(ctx: Ctx, marketplace: MarketplaceInfo, entry: Marke
     idScope: marketplaceScope(marketplace),
     marketplace: raw.synthetic ? undefined : marketplace.name,
     source: marketplace.source,
+    atMarketplaceRoot: !raw.synthetic && isRootSource(raw.entry.source),
   });
 }
 
@@ -1302,9 +1522,46 @@ async function discoverPlugins(ctx: Ctx, tree: RepoTree, dir: string, source: st
  * otherwise a single plugin (plugin.json and/or standard component folders) → the parsed plugin,
  * ready to save (enabled: true, no settings yet so defaults apply, unsupported parts listed).
  */
+/** "owner/repo#<ref>/<path>" → the split that named a real branch or tag (see githubRefSplits). */
+const sessionRefs = new Map<string, string>();
+
+/**
+ * Parses a link and lists its repo at the link's ref. A /tree/ or /blob/ link's ref may contain "/"
+ * (".../tree/feature/x/skills"): its splits are tried shortest ref first, at most 4 lookups.
+ */
+async function openLink(ctx: Ctx, link: string): Promise<{ ref: RepoRef; tree: RepoTree }> {
+  const parsed = parseGithubLink(link);
+  if (!parsed) throw new Error('Paste a GitHub link, e.g. https://github.com/owner/repo or owner/repo.');
+  const key = `${parsed.owner}/${parsed.repo}#${parsed.refPath ?? ''}`.toLowerCase();
+  const splits = githubRefSplits(parsed);
+  const known = splits.find((s) => s.branch === sessionRefs.get(key));
+  let firstError: unknown;
+  for (const ref of known ? [known] : splits.slice(0, 4)) {
+    try {
+      const tree = await ctx.tree(ref.owner, ref.repo, ref.branch);
+      if (ref.branch && parsed.refPath) sessionRefs.set(key, ref.branch);
+      return { ref, tree };
+    } catch (e) {
+      if (!isNotFound(e) || !ref.branch) throw e;
+      firstError ??= e;
+    }
+  }
+  throw firstError;
+}
+
+/** The files of the repo a GitHub link points into, at the link's ref (cached for the session). */
+export async function listGithubLink(
+  link: string,
+  githubToken?: string,
+): Promise<{ owner: string; repo: string; ref: string; path: string; file?: string; files: string[] }> {
+  const { ref, tree } = await openLink(createCtx(githubToken || undefined), link);
+  const out = { owner: tree.owner, repo: tree.repo, ref: tree.ref, path: ref.path, files: [...tree.files.keys()] };
+  return ref.file !== undefined ? { ...out, file: ref.file } : out;
+}
+
 export async function inspectGithubSource(link: string, githubToken?: string): Promise<InstallTarget> {
-  const ref = parseGithubLink(link);
-  if (!ref) throw new Error('Paste a GitHub link, e.g. https://github.com/owner/repo or owner/repo.');
+  const ctx = createCtx(githubToken || undefined);
+  const { ref, tree } = await openLink(ctx, link);
   const rawDir = ref.file ? dirname(ref.file) : ref.path;
   if (hasDotDot(rawDir)) throw new Error('That link points outside the repository.');
   let decoded = rawDir;
@@ -1316,8 +1573,6 @@ export async function inspectGithubSource(link: string, githubToken?: string): P
   let dir = joinPath(decoded);
   if (basename(dir) === '.claude-plugin') dir = dirname(dir);
 
-  const ctx = createCtx(githubToken || undefined);
-  const tree = await ctx.tree(ref.owner, ref.repo, ref.branch);
   await ctx.fill(tree, dir);
   const source = cleanLink(link);
   if (!hasDir(tree, dir)) throw new Error(`Couldn’t find the folder “${dir}” in ${ref.owner}/${ref.repo}.`);
@@ -1325,6 +1580,7 @@ export async function inspectGithubSource(link: string, githubToken?: string): P
   if (hasFile(tree, joinPath(dir, '.claude-plugin/marketplace.json'))) {
     return { kind: 'marketplace', marketplace: await readMarketplace(ctx, tree, dir, source) };
   }
+  await resolveLinks(ctx, tree, dir);
   if (looksLikePlugin(tree, dir)) {
     const fromMarketplace = await pluginFromParentMarketplace(ctx, tree, dir, source);
     if (fromMarketplace) return { kind: 'plugin', plugin: fromMarketplace };
