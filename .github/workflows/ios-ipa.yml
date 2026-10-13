@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +24,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - name: Use the newest Xcode
+        run: |
+          X=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$X"
+          xcodebuild -version
 
       - run: npm ci
 
@@ -43,7 +49,7 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build > build.log 2>&1 || { grep -nE "error:|BUILD FAILED|fatal" build.log | head -80; tail -n 60 build.log; exit 1; }
+            build > build.log 2>&1 || { grep -nE -A8 "error:|BUILD FAILED|fatal" build.log | head -160; tail -n 60 build.log; exit 1; }
           tail -n 5 build.log
           APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
           [ -n "$APP" ] || { echo "No .app was built"; exit 1; }
