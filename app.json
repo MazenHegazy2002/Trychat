@@ -49,7 +49,7 @@
         {
           "photosPermission": "TryChat needs your photos so you can attach them to chats.",
           "cameraPermission": "TryChat needs the camera so you can send photos in chats.",
-          "microphonePermission": false
+          "microphonePermission": "TryChat uses the microphone so you can send voice messages."
         }
       ],
       "expo-sharing",
