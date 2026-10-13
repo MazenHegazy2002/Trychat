@@ -191,6 +191,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         agentProfiles: pluginAgents(pluginsRef.current),
         account: accountRef.current,
         install: (item) => installRef.current(item),
+        plugins: pluginsRef.current,
       };
       return { ...base, runSubAgents: (tasks) => runSubAgents(base, model, tasks) };
     },

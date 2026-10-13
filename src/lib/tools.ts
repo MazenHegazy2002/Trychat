@@ -5,7 +5,7 @@ import { phoneTools } from './phoneTools';
 import type { AgentProfile } from './plugins';
 import { socialTools } from './socialTools';
 import { storeTools } from './storeTools';
-import type { Account, Attachment, InstallItem, McpServer, McpTool, Settings, Skill, ToolCall } from './types';
+import type { Account, Attachment, InstallItem, McpServer, McpTool, Plugin, Settings, Skill, ToolCall } from './types';
 import { webTools } from './webTools';
 import { FILES } from './toolResult';
 
@@ -33,6 +33,8 @@ export interface ToolContext {
   agentProfiles?: AgentProfile[];
   /** The signed-in account (for friends and shared files). */
   account?: Account | null;
+  /** Installed plugins (store.search marks the ones already installed; optional). */
+  plugins?: Plugin[];
   /** Provided by the store: saves an approved plugin, skill or MCP server and makes it usable right away. */
   install?: (item: InstallItem) => Promise<string>;
   /** Values the user typed into the approval card (e.g. API keys). Never stored in the chat. */
@@ -430,6 +432,11 @@ ${tools.map(([name, t]) => `- ${name} ${t.params} — ${t.description}`).join('\
       `Specialist agents you can delegate to with agents.run (set "agent" to the name):\n${agents
         .map((a) => `- ${a.name}: ${a.description}`)
         .join('\n')}`,
+    );
+  }
+  if (tools.some(([n]) => n === 'store.install')) {
+    parts.push(
+      `When a task needs a capability, tool, integration or skill you don't have, look for it with store.search (short keywords), then ask to install the best match with store.install and a one-line reason. The user approves it and enters any API keys on the install card; never ask for keys in the chat. Once it's installed, use the new tools or skills right away and finish the task. Never say something is installed unless store.install succeeded.`,
     );
   }
   if (ctx.settings.repos.length && githubConnected(ctx.settings)) {

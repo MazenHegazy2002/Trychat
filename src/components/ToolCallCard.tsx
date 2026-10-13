@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { InstallCard } from './InstallCard';
+import { storeToolLabel } from '../lib/storeTools';
 import { useTheme } from '../lib/theme';
 import { toolLabel, toolService } from '../lib/tools';
 import type { ToolApproval } from '../lib/store';
@@ -26,6 +28,9 @@ export function ToolCallCard({ call, onApprove, onDeny }: Props) {
   const theme = useTheme();
   const [open, setOpen] = useState(false);
   const service = toolService(call);
+  // store.install has its own card: what it adds, the assistant's reason, and fields for keys.
+  if (call.name === 'store.install') return <InstallCard call={call} onApprove={onApprove} onDeny={onDeny} />;
+  const label = storeToolLabel(call) ?? toolLabel(call);
   const where =
     {
       github: 'GitHub',
@@ -65,7 +70,7 @@ export function ToolCallCard({ call, onApprove, onDeny }: Props) {
             <Text style={{ color: theme.muted, fontSize: 11, fontWeight: '600' }}>{where}</Text>
           </View>
           <Text style={{ color: theme.text, flex: 1, fontSize: 14 }} numberOfLines={open ? undefined : 1}>
-            {toolLabel(call)}
+            {label}
           </Text>
           {call.status === 'running' ? (
             <ActivityIndicator size="small" color={theme.muted} />
@@ -94,7 +99,7 @@ export function ToolCallCard({ call, onApprove, onDeny }: Props) {
   return (
     <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <Text style={{ color: theme.muted, fontSize: 13 }}>{where} · needs your OK</Text>
-      <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600', marginTop: 4 }}>{toolLabel(call)}</Text>
+      <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600', marginTop: 4 }}>{label}</Text>
       {detail !== null && (
         <ScrollView style={[styles.output, { backgroundColor: theme.codeBg }]} nestedScrollEnabled>
           <Text selectable style={[styles.mono, { color: theme.codeText }]}>
