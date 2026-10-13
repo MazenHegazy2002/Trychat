@@ -14,6 +14,7 @@ const CONNECT_TIMEOUT = 30_000;
 const REQUEST_TIMEOUT = 120_000;
 const CLIENT_INFO = { name: 'TryChat', version: '1.0.0' };
 const sessions = new Map<string, string | null>(); // server id -> Mcp-Session-Id
+const versions = new Map<string, string>(); // server id -> negotiated protocol version
 let nextId = 1;
 
 /** The server's transport. When unset, a URL path ending in /sse means the legacy SSE transport. */
@@ -54,20 +55,27 @@ function requestUrl(server: McpServer): string {
   return secrets ? server.url.replace(/\{([A-Za-z0-9_.-]+)\}/g, (m, key: string) => secrets[key] ?? m) : server.url;
 }
 
-async function post(server: McpServer, payload: object): Promise<{ status: number; messages: any[]; session?: string }> {
+async function post(
+  server: McpServer,
+  payload: object,
+): Promise<{ status: number; messages: any[]; session?: string; type?: string }> {
   const session = sessions.get(server.id);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
   const res = await fetch(requestUrl(server), {
+    signal: controller.signal,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
-      'MCP-Protocol-Version': PROTOCOL_VERSION,
+      // The version the server agreed to; 2024-11-05 servers predate this header.
+      ...(versions.get(server.id) !== '2024-11-05' ? { 'MCP-Protocol-Version': versions.get(server.id) ?? PROTOCOL_VERSION } : {}),
       ...authHeaders(server),
       ...(session ? { 'Mcp-Session-Id': session } : {}),
     },
     body: JSON.stringify(payload),
   });
-  const text = await res.text();
+  const text = await res.text().finally(() => clearTimeout(timer));
   const type = res.headers.get('content-type') ?? '';
   let messages: any[] = [];
   if (type.includes('text/event-stream')) messages = parseSse(text);
@@ -80,14 +88,34 @@ async function post(server: McpServer, payload: object): Promise<{ status: numbe
     }
   }
   if (!res.ok && res.status !== 202) {
-    const msg = messages[0]?.error?.message ?? text.slice(0, 300);
-    throw Object.assign(new Error(`MCP ${res.status}: ${msg || res.statusText}`), { status: res.status });
+    const first = messages[0];
+    const msg =
+      first?.error?.message ??
+      first?.result?.content?.find((c: any) => c?.type === 'text')?.text ??
+      text.slice(0, 300);
+    const oauth = res.status === 401 && /resource_metadata/i.test(res.headers.get('www-authenticate') ?? '');
+    throw Object.assign(
+      new Error(`MCP ${res.status}: ${msg || res.statusText}${oauth ? ' (this server needs an OAuth sign-in or a token)' : ''}`),
+      { status: res.status, sentSession: !!session },
+    );
   }
-  return { status: res.status, messages, session: res.headers.get('mcp-session-id') ?? undefined };
+  return { status: res.status, messages, session: res.headers.get('mcp-session-id') ?? undefined, type };
 }
 
-async function initialize(server: McpServer) {
+// One initialize at a time per server; concurrent first calls share it.
+const initializing = new Map<string, Promise<void>>();
+
+function initialize(server: McpServer): Promise<void> {
+  const running = initializing.get(server.id);
+  if (running) return running;
+  const p = doInitialize(server).finally(() => initializing.delete(server.id));
+  initializing.set(server.id, p);
+  return p;
+}
+
+async function doInitialize(server: McpServer) {
   sessions.delete(server.id);
+  versions.delete(server.id);
   const id = nextId++;
   const res = await post(server, {
     jsonrpc: '2.0',
@@ -96,7 +124,10 @@ async function initialize(server: McpServer) {
     params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT_INFO },
   });
   const reply = res.messages.find((m) => m.id === id);
-  if (reply?.error) throw new Error(`MCP: ${reply.error.message}`);
+  if (!reply) throw new Error(`MCP: ${server.url} is not an MCP endpoint (got ${res.type || 'no reply'})`);
+  if (reply.error) throw new Error(`MCP: ${reply.error.message}`);
+  const version = reply.result?.protocolVersion;
+  if (typeof version === 'string') versions.set(server.id, version);
   sessions.set(server.id, res.session ?? null);
   await post(server, { jsonrpc: '2.0', method: 'notifications/initialized' });
 }
@@ -114,8 +145,10 @@ async function httpRpc(server: McpServer, method: string, params: object): Promi
   try {
     return await call();
   } catch (e: any) {
-    if (e?.status === 404 || e?.status === 400) {
-      await initialize(server); // session expired
+    // Only a 404 on a request that carried a session id means the session expired (MCP spec).
+    // Anything else (e.g. a 400 for bad arguments) must not re-send the call.
+    if (e?.status === 404 && e?.sentSession) {
+      await initialize(server);
       return call();
     }
     throw e;
@@ -356,7 +389,7 @@ async function sseRpc(server: McpServer, method: string, params: object): Promis
   try {
     return await sseRequest(conn, method, params);
   } catch (e: any) {
-    if (e?.status === 404 || e?.status === 400) {
+    if (e?.status === 404) {
       closeConnection(conn, e); // session expired: reconnect and re-initialize
       return sseRequest(await sseConnection(server), method, params);
     }
@@ -374,11 +407,15 @@ function rpc(server: McpServer, method: string, params: object): Promise<any> {
 export async function listMcpTools(server: McpServer): Promise<McpTool[]> {
   const tools: McpTool[] = [];
   let cursor: string | undefined;
-  do {
+  const seen = new Set<string>();
+  for (let page = 0; page < 50; page++) {
     const result = await rpc(server, 'tools/list', cursor ? { cursor } : {});
     tools.push(...(result?.tools ?? []));
     cursor = result?.nextCursor;
-  } while (cursor && tools.length < 500);
+    // Stop on a repeated cursor too, so a misbehaving server can't loop forever.
+    if (!cursor || seen.has(cursor) || tools.length >= 500) break;
+    seen.add(cursor);
+  }
   return tools;
 }
 
