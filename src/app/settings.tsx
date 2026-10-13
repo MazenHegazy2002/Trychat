@@ -1,10 +1,11 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { ModelPicker } from '../components/ModelPicker';
 import { listModels } from '../lib/api';
+import { setBackgroundEnabled, subscribeBackgroundEnabled } from '../lib/background';
 import { DEFAULT_SETTINGS } from '../lib/storage';
 import { useStore } from '../lib/store';
 import { githubConnected, laptopConnected } from '../lib/tools';
@@ -19,6 +20,8 @@ export default function SettingsScreen() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [showKey, setShowKey] = useState(false);
+  const [background, setBackground] = useState(true);
+  useEffect(() => subscribeBackgroundEnabled(setBackground), []);
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     const next = { ...draft, [key]: value };
@@ -233,6 +236,16 @@ export default function SettingsScreen() {
           <Switch value={draft[key]} onValueChange={(v) => set(key, v)} />
         </View>
       ))}
+
+      <View style={[styles.switchRow, { borderBottomColor: theme.border }]}>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={{ color: theme.text, fontSize: 16 }}>Keep working in the background</Text>
+          <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
+            Finish replies and tools after you leave the app, and notify you when done (this device only)
+          </Text>
+        </View>
+        <Switch value={background} onValueChange={setBackgroundEnabled} />
+      </View>
 
       <Text style={[styles.section, { color: theme.text }]}>Data</Text>
       <Pressable

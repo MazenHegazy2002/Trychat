@@ -1,4 +1,6 @@
-import { Stack } from 'expo-router';
+import * as Notifications from 'expo-notifications';
+import { router, Stack } from 'expo-router';
+import { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -10,6 +12,15 @@ import { useTheme } from '../lib/theme';
 function Navigator() {
   const theme = useTheme();
   const { ready } = useStore();
+  const response = Notifications.useLastNotificationResponse();
+
+  // Tapping a "TryChat replied" notification opens that chat.
+  useEffect(() => {
+    const url = response?.notification.request.content.data?.url;
+    if (!ready || typeof url !== 'string') return;
+    router.push(url as never);
+    Notifications.clearLastNotificationResponse();
+  }, [ready, response]);
 
   if (!ready) {
     return (

@@ -7,6 +7,7 @@ import { deleteAttachmentFiles, messageContent } from './attachments';
 import { chat } from './api';
 import { uid } from './id';
 import { addToLibrary } from './library';
+import { notifyIfBackground, syncBackgroundWork } from './background';
 import { carryOverSettings } from './pluginInstaller';
 import { buildApiMessages, extractMemoryOps, stripMemoryTags } from './prompt';
 import * as storage from './storage';
@@ -229,6 +230,42 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const t = setTimeout(() => storage.saveConversations(conversations), 400);
     return () => clearTimeout(t);
   }, [conversations, ready]);
+
+  // Flush the debounced save as soon as the app leaves the foreground (the OS may kill it any time).
+  useEffect(() => {
+    if (!ready) return;
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active') storage.saveConversations(convRef.current);
+    });
+    return () => sub.remove();
+  }, [ready]);
+
+  // Keep a foreground service / background task alive while work runs; notify when a chat finishes.
+  const prevBusy = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    const ids = Object.keys(busy);
+    const busyConvs = convRef.current.filter((c) => busy[c.id]);
+    const running = busyConvs.length === 1 ? busyConvs[0].messages.at(-1)?.toolCall : undefined;
+    const progress =
+      busyConvs.length === 1
+        ? `${busyConvs[0].title}: ${running?.status === 'running' ? `running ${running.name}` : 'writing a reply'}`
+        : undefined;
+    const finished = Object.keys(prevBusy.current).filter((id) => !busy[id]);
+    prevBusy.current = busy;
+    for (const id of finished) {
+      const conv = convRef.current.find((c) => c.id === id);
+      const last = conv?.messages.at(-1);
+      if (!conv || last?.role !== 'assistant') continue;
+      if (last.toolCall?.status === 'pending') {
+        notifyIfBackground(id, `TryChat needs your approval in ${conv.title}`, `Allow ${last.toolCall.name}?`);
+      } else {
+        const line = (last.error ? `Error: ${last.error}` : last.content).trim().split('\n')[0] || 'Reply finished';
+        notifyIfBackground(id, `TryChat replied in ${conv.title}`, line);
+      }
+    }
+    if (finished.length && ids.length === 0) storage.saveConversations(convRef.current);
+    syncBackgroundWork(ids.length, progress);
+  }, [busy, conversations]);
 
   useEffect(() => {
     if (ready) storage.saveMemories(memories);

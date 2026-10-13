@@ -58,7 +58,14 @@
         {
           "microphonePermission": "TryChat uses the microphone so you can send voice messages."
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#E6F4FE"
+        }
+      ],
+      "./plugins/withBackgroundService"
     ]
   }
 }
