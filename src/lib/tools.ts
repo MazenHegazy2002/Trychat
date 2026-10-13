@@ -98,8 +98,30 @@ export async function githubWhoAmI(settings: Settings): Promise<string> {
 
 // ---------- Laptop bridge ----------
 
+/** The bridge address with http:// added when the scheme is missing and no trailing slashes. */
+export function normalizeBridgeUrl(url: string): string {
+  const u = url.trim().replace(/\/+$/, '');
+  return !u || /^[a-z][a-z\d+.-]*:\/\//i.test(u) ? u : `http://${u}`;
+}
+
+/** Bytes of a laptop file read at a time; with the note it fits in MAX_RESULT_CHARS. */
+const LAPTOP_READ_BYTES = 10_000;
+/** Characters of command output (stdout + stderr) shown to the model. */
+const RUN_OUTPUT_CHARS = 11_000;
+
+/** Keeps the start and end of `text` within `budget` characters, never splitting a surrogate pair. */
+function clipMiddle(text: string, budget: number, totalBytes?: number): string {
+  if (text.length <= budget) return text;
+  let head = Math.floor(budget / 3);
+  let tail = text.length - (budget - head);
+  if (/[\ud800-\udbff]/.test(text[head - 1] ?? '')) head--;
+  if (/[\udc00-\udfff]/.test(text[tail] ?? '')) tail++;
+  const total = totalBytes ? `; ${totalBytes} bytes in total` : '';
+  return `${text.slice(0, head)}\n…[${tail - head} chars omitted${total}]…\n${text.slice(tail)}`;
+}
+
 async function bridge(settings: Settings, path: string, body?: unknown) {
-  const base = settings.bridgeUrl.replace(/\/+$/, '');
+  const base = normalizeBridgeUrl(settings.bridgeUrl);
   const res = await fetch(base + path, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { Authorization: `Bearer ${settings.bridgeToken}`, 'Content-Type': 'application/json' },
@@ -204,16 +226,25 @@ const STATIC_TOOLS: Record<string, Omit<ToolDef, 'run'> & { run: (s: Settings, a
     label: (a) => `Listed ${a.path || 'files'} on your laptop`,
     run: async (s, a) => {
       const r = await bridge(s, '/list', { path: a.path ?? '.' });
-      return r.entries.join('\n') || '(empty folder)';
+      const list = r.entries.join('\n') || '(empty folder)';
+      return r.more ? `${list}\n…and ${r.more} more not shown (list a subfolder, or use laptop.run to search)` : list;
     },
   },
   'laptop.read_file': {
     service: 'laptop',
     kind: 'read',
-    description: 'Read a text file on the laptop.',
-    params: '{"path":"file/path"}',
+    description: `Read a text file on the laptop, up to ${LAPTOP_READ_BYTES} bytes at a time. For more of a long file pass "offset" (bytes to skip); a negative offset counts from the end, e.g. -${LAPTOP_READ_BYTES} for the end of a log.`,
+    params: '{"path":"file/path","offset":"optional byte offset"}',
     label: (a) => `Read ${a.path} on your laptop`,
-    run: async (s, a) => (await bridge(s, '/read', { path: a.path })).content,
+    run: async (s, a) => {
+      const offset = a.offset === undefined || a.offset === null ? undefined : Number(a.offset);
+      if (offset !== undefined && !Number.isSafeInteger(offset)) throw new Error('"offset" must be a whole number of bytes');
+      const r = await bridge(s, '/read', { path: a.path, offset, length: LAPTOP_READ_BYTES });
+      if (r.binary) return `${r.path} is a binary file (${r.size} bytes), so it can't be shown as text.`;
+      if (typeof r.size !== 'number' || (r.offset === 0 && r.end >= r.size)) return r.content;
+      const next = r.end < r.size ? `"offset": ${r.end} reads on from here` : 'this is the end of the file';
+      return `${r.content}\n…[truncated: showed bytes ${r.offset}–${r.end} of ${r.size}; ${next}${r.offset > 0 ? ', "offset": 0 reads from the start' : ''}]`;
+    },
   },
   'laptop.write_file': {
     service: 'laptop',
@@ -222,22 +253,36 @@ const STATIC_TOOLS: Record<string, Omit<ToolDef, 'run'> & { run: (s: Settings, a
     params: '{"path":"file/path","content":"full file content"}',
     label: (a) => `Write ${a.path} on your laptop`,
     run: async (s, a) => {
-      const r = await bridge(s, '/write', { path: a.path, content: a.content ?? '' });
+      // A missing "content" must not wipe the file.
+      if (typeof a.content !== 'string') throw new Error('"content" is required: the full new file content as a string');
+      const r = await bridge(s, '/write', { path: a.path, content: a.content });
       return `Wrote ${r.bytes} bytes to ${r.path}`;
     },
   },
   'laptop.run': {
     service: 'laptop',
     kind: 'command',
-    description: 'Run a shell command on the laptop and get its output.',
+    description:
+      'Run a shell command on the laptop and get its output. It is stopped (with everything it started) after the bridge timeout; to leave a server running, redirect its output, e.g. "nohup npm run dev > dev.log 2>&1 &".',
     params: '{"command":"npm test","cwd":"optional/folder"}',
     label: (a) => `Run \`${a.command}\` on your laptop`,
     run: async (s, a) => {
       const r = await bridge(s, '/run', { command: a.command, cwd: a.cwd ?? '.' });
+      const how = r.timedOut
+        ? ` (timed out${r.timeoutMs ? ` after ${r.timeoutMs / 1000}s` : ''}; it and its child processes were stopped)`
+        : r.outputLimit
+          ? ` (stopped after printing more than ${Math.round(r.outputLimit / 1048576)} MB)`
+          : r.signal
+            ? ` (killed by signal ${r.signal})`
+            : '';
+      // stderr usually holds the error, so it gets its share first; stdout keeps its start and its end.
+      const out: string = r.stdout ?? '';
+      const err: string = r.stderr ?? '';
+      const errBudget = Math.min(err.length, Math.max(RUN_OUTPUT_CHARS / 2, RUN_OUTPUT_CHARS - out.length));
       return [
-        `exit code: ${r.exitCode}${r.timedOut ? ' (timed out)' : ''}`,
-        r.stdout && `stdout:\n${r.stdout}`,
-        r.stderr && `stderr:\n${r.stderr}`,
+        `exit code: ${r.exitCode ?? 'none'}${how}`,
+        out && `stdout:\n${clipMiddle(out, RUN_OUTPUT_CHARS - errBudget, r.stdoutBytes)}`,
+        err && `stderr:\n${clipMiddle(err, errBudget, r.stderrBytes)}`,
       ]
         .filter(Boolean)
         .join('\n');
@@ -393,32 +438,134 @@ ${tools.map(([name, t]) => `- ${name} ${t.params} — ${t.description}`).join('\
   return parts.length ? parts.join('\n\n') : null;
 }
 
-const TOOL_RE = /<tool\s+name="([\w.\-]+)"\s*>([\s\S]*?)<\/tool>/i;
+interface ToolBlock {
+  start: number;
+  end: number;
+  name: string;
+  body: string;
+  /** False for a block still being streamed (or a "<tool …" tag at the very end). */
+  closed: boolean;
+}
+
+/** Fenced code, inline code, a tool opening tag, or a tool tag cut off at the very end (while streaming). */
+const SCAN_RE = /(^|\n) {0,3}(`{3,}|~{3,})[^\n]*|`+|<tool\s+name\s*=\s*(["'])([\w.\-]+)\3\s*>|<t(?:o(?:o(?:l(?:\s[^<>]*)?)?)?)?$/gi;
+const OPEN_RE = /<tool\s+name\s*=\s*(["'])[\w.\-]+\1\s*>/gi;
+
+/** Parses a tool block's body; `syntaxOk` says whether it was valid JSON at all (so the block really ends there). */
+function parseArgs(body: string): { args?: Args; error?: string; syntaxOk: boolean } {
+  let src = body.trim();
+  const fenced = src.match(/^```[\w-]*[ \t]*\n?([\s\S]*?)\n?[ \t]*```$/);
+  if (fenced) src = fenced[1].trim();
+  if (!src) return { args: {}, syntaxOk: true };
+  let value: unknown;
+  try {
+    value = JSON.parse(src);
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    return {
+      syntaxOk: false,
+      error: `Tool arguments were not valid JSON (${why}). Write one JSON object, e.g. {"path":"src"}, with double quotes and \\n for newlines inside strings.`,
+    };
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    const what = value === null ? 'null' : Array.isArray(value) ? 'an array' : `a ${typeof value}`;
+    return { syntaxOk: true, error: `Tool arguments must be a JSON object like {"arg":"value"}, not ${what}.` };
+  }
+  return { args: value as Args, syntaxOk: true };
+}
+
+/** Finds the tool blocks in a reply, skipping ones inside ``` fences or `inline code` (examples, not calls). */
+function scanToolBlocks(text: string): ToolBlock[] {
+  const blocks: ToolBlock[] = [];
+  const re = new RegExp(SCAN_RE.source, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m[2]) {
+      // Fenced code: skip to the closing fence; an unclosed fence runs to the end.
+      const close = new RegExp(`\\n {0,3}${m[2][0]}{${m[2].length},}[ \\t]*(?=\\n|$)`, 'g');
+      close.lastIndex = re.lastIndex;
+      const c = close.exec(text);
+      if (!c) break;
+      re.lastIndex = c.index + c[0].length;
+    } else if (m[0][0] === '`') {
+      // Inline code: a backtick run of the same length on the same line closes it; otherwise it's plain text.
+      const lineEnd = text.indexOf('\n', re.lastIndex);
+      const limit = lineEnd === -1 ? text.length : lineEnd;
+      for (let i = re.lastIndex; i < limit; ) {
+        const j = text.indexOf('`', i);
+        if (j === -1 || j >= limit) break;
+        let k = j;
+        while (text[k] === '`') k++;
+        if (k - j === m[0].length) {
+          re.lastIndex = k;
+          break;
+        }
+        i = k;
+      }
+    } else if (m[4]) {
+      const bodyStart = re.lastIndex;
+      // The block ends at the first </tool> after which the body is valid JSON, so "</tool>" inside a JSON string
+      // works; if none parses, at the first </tool> before the next opening tag (to report the JSON error).
+      const closeRe = /<\/tool\s*>/gi;
+      closeRe.lastIndex = bodyStart;
+      let first: RegExpExecArray | null = null;
+      let chosen: RegExpExecArray | null = null;
+      for (let c = closeRe.exec(text); c; c = closeRe.exec(text)) {
+        first ??= c;
+        if (parseArgs(text.slice(bodyStart, c.index)).syntaxOk) {
+          chosen = c;
+          break;
+        }
+      }
+      OPEN_RE.lastIndex = bodyStart;
+      const nextOpen = OPEN_RE.exec(text)?.index ?? text.length;
+      const close = chosen ?? (first && first.index < nextOpen ? first : null);
+      if (close) {
+        const end = close.index + close[0].length;
+        blocks.push({ start: m.index, end, name: m[4], body: text.slice(bodyStart, close.index), closed: true });
+        re.lastIndex = end;
+      } else if (nextOpen === text.length) {
+        blocks.push({ start: m.index, end: text.length, name: m[4], body: text.slice(bodyStart), closed: false });
+        break;
+      }
+      // Otherwise it's prose mentioning the syntax ("<tool name=…>") before a real block: keep scanning after it.
+    } else {
+      blocks.push({ start: m.index, end: text.length, name: '', body: '', closed: false });
+    }
+  }
+  return blocks;
+}
 
 /** Finds the first complete tool block in the model's reply. */
 export function parseToolCall(text: string, ctx: ToolContext): { call: ToolCall | null; before: string } {
-  const m = text.match(TOOL_RE);
-  if (!m) return { call: null, before: text };
-  let args: Args = {};
-  let parseError: string | undefined;
-  try {
-    args = m[2].trim() ? JSON.parse(m[2]) : {};
-  } catch {
-    parseError = 'Tool arguments were not valid JSON.';
-  }
-  const known = getTools(ctx)[m[1]];
+  const blocks = scanToolBlocks(text).filter((b) => b.closed);
+  const block = blocks[0];
+  if (!block) return { call: null, before: text };
+  const { args = {}, error } = parseArgs(block.body);
+  const known = getTools(ctx)[block.name];
   const call: ToolCall = {
-    name: m[1],
+    name: block.name,
     args,
-    status: known && !parseError ? 'pending' : 'error',
-    result: !known ? `Unknown or unavailable tool "${m[1]}".` : parseError,
+    status: known && !error ? 'pending' : 'error',
+    result: !known ? `Unknown or unavailable tool "${block.name}".` : error,
   };
-  return { call, before: text.slice(0, m.index).trim() };
+  if (blocks.length > 1) {
+    call.note = `Only the first tool block was run (you wrote ${blocks.length}). Use one tool at a time; send the next one now if you still need it.`;
+  }
+  return { call, before: text.slice(0, block.start).trim() };
 }
 
-/** Removes tool blocks, including one still streaming, from text shown to the user. */
+/** Removes tool blocks, including one still streaming, from text shown to the user. Examples in code are kept. */
 export function stripToolTags(text: string): string {
-  return text.replace(/<tool\s[\s\S]*?(<\/tool>|$)/gi, '').trim();
+  let out = '';
+  let pos = 0;
+  for (const b of scanToolBlocks(text)) {
+    // An unclosed block is hidden only while it looks like a call being streamed, not prose mentioning "<tool name=…>".
+    if (!b.closed && b.name && !/^\s*([{`]|$)/.test(b.body)) continue;
+    out += text.slice(pos, b.start);
+    pos = b.end;
+  }
+  return (out + text.slice(pos)).trim();
 }
 
 const SERVICE_OF_PREFIX: Record<string, Service> = {
@@ -501,7 +648,10 @@ export async function runToolCall(call: ToolCall, ctx: ToolContext): Promise<{ r
   const files: Attachment[] | undefined = out && typeof out === 'object' && out[FILES] ? out.files : undefined;
   const value = files ? out.text : out;
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-  const result = text.length > MAX_RESULT_CHARS ? text.slice(0, MAX_RESULT_CHARS) + '\n…[truncated]' : text;
+  let cut = MAX_RESULT_CHARS;
+  if (/[\ud800-\udbff]/.test(text[cut - 1] ?? '')) cut--; // never split a surrogate pair
+  const result =
+    text.length > MAX_RESULT_CHARS ? `${text.slice(0, cut)}\n…[truncated: showed the first ${cut} of ${text.length} characters]` : text;
   return files?.length ? { result, files } : { result };
 }
 
@@ -517,5 +667,5 @@ export function formatToolCall(call: ToolCall): string {
 export function formatToolResult(call: ToolCall): string {
   const outcome =
     call.status === 'denied' ? 'The user denied this action.' : call.status === 'error' ? `Error: ${call.result}` : call.result;
-  return `[Tool result: ${call.name}]\n${outcome}`;
+  return `[Tool result: ${call.name}]\n${outcome}${call.note ? `\n\n${call.note}` : ''}`;
 }

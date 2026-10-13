@@ -1,6 +1,6 @@
 import { chat } from './api';
 import type { ApiMessage } from './api';
-import { formatToolCall, formatToolResult, needsApproval, parseToolCall, runTool, toolInstructions } from './tools';
+import { formatToolCall, formatToolResult, getTools, needsApproval, parseToolCall, runTool, toolInstructions } from './tools';
 import type { ToolContext } from './tools';
 
 /**
@@ -22,8 +22,14 @@ async function runOne(ctx: ToolContext, defaultModel: string, { task, model, age
   // A plugin agent's `model` names Claude models (sonnet/opus/inherit), so it's ignored here:
   // only a model id the assistant passes explicitly overrides the chat's model.
   const profile = agent ? ctx.agentProfiles?.find((p) => p.name === agent) : undefined;
-  const safe = (name: string) => name !== 'agents.run' && !needsApproval({ name, args: {}, status: 'pending' }, ctx);
   const subCtx: ToolContext = { ...ctx, runSubAgents: undefined };
+  // Only reads, code.run and MCP tools the user lets run without asking — never commands, writes, installs or more
+  // sub-agents, even when the user turned confirmations off for the main chat.
+  const available = getTools(subCtx);
+  const safe = (name: string) => {
+    const kind = available[name]?.kind;
+    return (kind === 'read' || kind === 'code' || kind === 'mcp') && !needsApproval({ name, args: {}, status: 'pending' }, ctx);
+  };
   const tools = toolInstructions(subCtx, (name) => safe(name));
   const messages: ApiMessage[] = [
     {
@@ -47,7 +53,7 @@ async function runOne(ctx: ToolContext, defaultModel: string, { task, model, age
     if (!call) return text.trim();
     messages.push({ role: 'assistant', content: `${before}\n\n${formatToolCall(call)}`.trim() });
     // Checked with the real arguments: code.run needs approval (so isn't allowed here) when the code uses the network.
-    if (call.status === 'pending' && call.name !== 'agents.run' && !needsApproval(call, ctx)) {
+    if (call.status === 'pending' && safe(call.name) && !needsApproval(call, ctx)) {
       try {
         call.result = await runTool(call, subCtx);
         call.status = 'done';

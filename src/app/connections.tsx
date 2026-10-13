@@ -5,7 +5,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
-import { githubWhoAmI, laptopInfo } from '../lib/tools';
+import { githubWhoAmI, laptopInfo, normalizeBridgeUrl } from '../lib/tools';
 import type { Settings } from '../lib/types';
 
 const BRIDGE_COMMAND = 'node bridge/trychat-bridge.mjs --root=~/Projects';
@@ -174,6 +174,7 @@ export default function ConnectionsScreen() {
         <TextInput
           value={draft.bridgeUrl}
           onChangeText={(v) => set('bridgeUrl', v.trim())}
+          onBlur={() => draft.bridgeUrl && set('bridgeUrl', normalizeBridgeUrl(draft.bridgeUrl))}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="url"
@@ -184,8 +185,8 @@ export default function ConnectionsScreen() {
         {label('Pairing code')}
         <TextInput
           value={draft.bridgeToken}
-          onChangeText={(v) => set('bridgeToken', v.trim().toUpperCase())}
-          autoCapitalize="characters"
+          onChangeText={(v) => set('bridgeToken', v.trim())}
+          autoCapitalize="none"
           autoCorrect={false}
           placeholder="XXXX-XXXX-XXXX"
           placeholderTextColor={theme.muted}

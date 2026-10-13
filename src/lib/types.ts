@@ -40,6 +40,8 @@ export interface ToolCall {
   result?: string;
   /** Files the tool sent to the user; shown under the tool card. */
   files?: Attachment[];
+  /** Told to the model with the result, e.g. that later tool blocks in the same reply were not run. */
+  note?: string;
 }
 
 export interface Conversation {

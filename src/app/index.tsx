@@ -4,6 +4,7 @@ import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'r
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MoveToProjectSheet } from '../components/MoveToProjectSheet';
+import { StorageIssuesBanner } from '../components/StorageIssues';
 import { TextPrompt } from '../components/TextPrompt';
 import { Icon } from '../components/ui';
 import { useStore } from '../lib/store';
@@ -74,6 +75,8 @@ export default function ConversationsScreen() {
           ),
         }}
       />
+
+      <StorageIssuesBanner />
 
       {needsSetup && (
         <Pressable
