@@ -65,12 +65,14 @@ export const stamp = (prev?: number) => Math.max(Date.now(), (prev ?? 0) + 1);
 /** Preferences that follow the account. Secrets and device-specific addresses stay on the device. */
 export const SYNCED_PREFS = [
   'baseUrl',
+  'webAccess',
   'model',
   'systemPrompt',
   'builderMode',
   'memoryEnabled',
   'stream',
   'temperature',
+  'transcriptionModel',
   'contextMessages',
   'confirmCommands',
   'confirmWrites',

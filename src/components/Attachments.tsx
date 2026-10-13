@@ -7,6 +7,7 @@ import { useTheme } from '../lib/theme';
 import type { Attachment } from '../lib/types';
 import { Icon } from './ui';
 import type { IconName } from './ui';
+import { VoiceNote } from './Voice';
 
 export type AttachSource = 'photos' | 'camera' | 'files';
 
@@ -104,7 +105,8 @@ export function MessageAttachments({ items }: { items: Attachment[] }) {
   const theme = useTheme();
   const [open, setOpen] = useState<Attachment | null>(null);
   const images = items.filter((a) => a.kind === 'image');
-  const files = items.filter((a) => a.kind === 'file');
+  const files = items.filter((a) => a.kind === 'file' && !a.voice);
+  const voices = items.filter((a) => a.voice);
   return (
     <View style={{ alignItems: 'flex-end', gap: 6, marginBottom: 6 }}>
       {images.length > 0 && (
@@ -119,6 +121,9 @@ export function MessageAttachments({ items }: { items: Attachment[] }) {
           ))}
         </View>
       )}
+      {voices.map((a) => (
+        <VoiceNote key={a.id} a={a} />
+      ))}
       {files.map((a) => (
         <FileTile key={a.id} a={a} />
       ))}

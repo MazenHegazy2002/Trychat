@@ -60,6 +60,7 @@ export const DEFAULT_SETTINGS: Settings = {
   memoryEnabled: true,
   stream: true,
   temperature: 0.7,
+  transcriptionModel: 'whisper-1',
   contextMessages: 40,
   githubToken: '',
   bridgeUrl: '',
@@ -70,6 +71,7 @@ export const DEFAULT_SETTINGS: Settings = {
   repos: [],
   subAgents: true,
   codeExecution: true,
+  webAccess: true,
   marketplaces: [],
   phoneFolder: null,
 };

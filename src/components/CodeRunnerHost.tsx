@@ -4,8 +4,9 @@ import { WebView } from 'react-native-webview';
 
 import { uid } from '../lib/id';
 import { registerExecutor, RUNNER_HTML } from '../lib/runner';
+import type { RunResult } from '../lib/runner';
 
-type Pending = { resolve: (s: string) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
+type Pending = { resolve: (r: RunResult) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
 
 /** Invisible WebView that executes code for the model and for "Run" buttons. Mounted once at the root. */
 export function CodeRunnerHost() {
@@ -21,7 +22,7 @@ export function CodeRunnerHost() {
     registerExecutor(async (language, code, timeoutMs) => {
       await ready.current;
       const id = uid();
-      return new Promise<string>((resolve, reject) => {
+      return new Promise<RunResult>((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.current.delete(id);
           reject(new Error(`Timed out after ${timeoutMs / 1000}s`));
@@ -56,7 +57,7 @@ export function CodeRunnerHost() {
           if (!p) return;
           clearTimeout(p.timer);
           pending.current.delete(msg.id);
-          if (msg.ok) p.resolve(msg.output || '(no output)');
+          if (msg.ok) p.resolve({ output: msg.output || (msg.files?.length ? '' : '(no output)'), files: msg.files ?? [] });
           else p.reject(new Error((msg.output ? msg.output + '\n' : '') + msg.error));
         }}
       />

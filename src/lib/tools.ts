@@ -1,6 +1,6 @@
 import { callMcpTool, mcpToolName } from './mcp';
-import { normalizeLanguage, runCode } from './runner';
-import { fileTools } from './fileTools';
+import { normalizeLanguage, runCodeWithFiles } from './runner';
+import { FILE_TOOL_LABELS, fileTools, saveRunnerFiles } from './fileTools';
 import { GITHUB_TOOLS } from './github';
 import { phoneTools } from './phoneTools';
 import type { AgentProfile } from './plugins';
@@ -8,7 +8,7 @@ import { socialTools } from './socialTools';
 import { storeTools } from './storeTools';
 import type { Account, Attachment, InstallItem, McpServer, McpTool, Plugin, Settings, Skill, ToolCall } from './types';
 import { webTools } from './webTools';
-import { FILES } from './toolResult';
+import { FILES, withFiles } from './toolResult';
 
 /**
  * Tools the model can use: GitHub (REST API with a personal access token) and the
@@ -199,13 +199,16 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
       service: 'code',
       kind: 'code',
       description:
-        'Run JavaScript or Python on the phone and get the printed output (sandboxed; Python has numpy/pandas via Pyodide; no access to the user\'s files). Use it to calculate, test code, or check data.',
+        'Run JavaScript or Python on the phone and get the printed output (sandboxed; Python has numpy/pandas/matplotlib via Pyodide; no access to the user\'s files). Use it to calculate, test code, or check data. To send the user a file (a chart PNG, CSV, Excel, JSON…), call saveFile(name, data, mimeType?) — in JS data can be a string, bytes, Blob or a <canvas> (draw charts with document.createElement("canvas")); in Python save_file(name, data) takes str, bytes, a matplotlib figure or a pandas DataFrame, and matplotlib charts left open are sent as PNGs automatically.',
       params: '{"language":"python|javascript","code":"print(2**10)"}',
       label: (a) => `Ran ${normalizeLanguage(a.language ?? '') ?? 'code'}`,
       run: async (_c, a) => {
         const lang = normalizeLanguage(a.language ?? '');
         if (!lang) throw new Error('language must be "python" or "javascript"');
-        return runCode(lang, String(a.code ?? ''));
+        const { output, files } = await runCodeWithFiles(lang, String(a.code ?? ''));
+        if (!files.length) return output;
+        const saved = saveRunnerFiles(files);
+        return withFiles(`${output}\n\n[Sent to the user: ${saved.map((f) => f.name).join(', ')}]`.trim(), saved);
       },
     };
   }
@@ -495,6 +498,7 @@ export function toolLabel(call: ToolCall, ctx?: ToolContext): string {
   } catch {
     // fall through
   }
+  if (FILE_TOOL_LABELS[call.name]) return FILE_TOOL_LABELS[call.name](call.args);
   if (call.name.startsWith('mcp.')) return `Used ${call.name.split('.').slice(2).join('.')} (${call.name.split('.')[1]})`;
   if (call.name === 'code.run') return `Ran ${call.args.language ?? 'code'}`;
   if (call.name === 'agents.run') return 'Sent sub-agents';

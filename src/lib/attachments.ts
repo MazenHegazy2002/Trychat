@@ -2,11 +2,13 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
+import { fetch } from 'expo/fetch';
 import { Platform } from 'react-native';
 
 import type { ApiContentPart } from './api';
 import { uid } from './id';
-import type { Attachment, ChatMessage } from './types';
+import { transcribeAudio } from './transcribe';
+import type { Attachment, ChatMessage, Settings } from './types';
 
 /**
  * Photos, camera shots and files attached to messages. Files are copied into the app's
@@ -119,7 +121,7 @@ export function formatSize(bytes: number): string {
 /** Text the model sees for attached files (contents for text files, a note otherwise). */
 function filesAsText(attachments: Attachment[]): string {
   return attachments
-    .filter((a) => a.kind === 'file')
+    .filter((a) => a.kind === 'file' && !a.voice)
     .map((a) =>
       a.text !== undefined
         ? `\n\n[Attached file: ${a.name}]\n\`\`\`${extOf(a.name)}\n${a.text}\n\`\`\``
@@ -156,4 +158,32 @@ export async function messageContent(
     result.set(m.id, parts.length ? [{ type: 'text', text: fullText || 'See the attached image.' }, ...parts] : fullText);
   }
   return result;
+}
+
+/** Keeps a finished recording (m4a) as a voice-note attachment. */
+export async function voiceAttachment(uri: string, durationMs: number): Promise<Attachment> {
+  const file = await keep(uri, 'voice.m4a');
+  return {
+    id: uid(),
+    kind: 'file',
+    name: 'Voice message.m4a',
+    mimeType: 'audio/mp4',
+    uri: file.uri,
+    size: file.size ?? 0,
+    origin: 'upload',
+    voice: { durationMs },
+  };
+}
+
+/** Transcribes a voice note with the server's `/audio/transcriptions`. Rejects with a short reason. */
+export async function transcribeVoice(settings: Settings, a: Attachment): Promise<string> {
+  const bytes = new Uint8Array(await new File(a.uri).arrayBuffer());
+  return transcribeAudio(
+    { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.transcriptionModel },
+    bytes,
+    'voice.m4a',
+    a.mimeType,
+    // The body is a fresh Uint8Array, so its buffer holds exactly the multipart bytes.
+    (url, init) => fetch(url, { ...init, body: init.body.buffer as ArrayBuffer }),
+  );
 }

@@ -20,7 +20,9 @@ import type { AttachSource } from '../../components/Attachments';
 import { FileCards } from '../../components/FileCards';
 import { Icon } from '../../components/ui';
 import { MONO, SlashMenu, isTypingSlashCommand } from '../../components/SlashMenu';
-import { pickFiles, pickImages, takePhoto } from '../../lib/attachments';
+import { pickFiles, pickImages, takePhoto, transcribeVoice, voiceAttachment } from '../../lib/attachments';
+import { takeQueuedAttachments } from '../../lib/library';
+import { VoiceRecorder } from '../../components/Voice';
 import { Markdown } from '../../components/Markdown';
 import { ModelPicker } from '../../components/ModelPicker';
 import { MoveToProjectSheet } from '../../components/MoveToProjectSheet';
@@ -61,8 +63,10 @@ export default function ChatScreen() {
   const [renaming, setRenaming] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [moving, setMoving] = useState(false);
-  const [pending, setPending] = useState<Attachment[]>([]);
+  const [pending, setPending] = useState<Attachment[]>(() => takeQueuedAttachments(id)); // "Attach to a new chat" from Files
   const [attaching, setAttaching] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [sendingVoice, setSendingVoice] = useState(false);
   const keyboardVisible = useKeyboardState((k) => k.isVisible);
   const inputRef = useRef<TextInput>(null);
 
@@ -91,6 +95,28 @@ export default function ChatScreen() {
     const match = resolveSlashCommand(text, store.commands);
     if (match?.prompt) store.send(id, match.prompt, attachments, text.trim());
     else store.send(id, text, attachments);
+  };
+
+  const sendVoice = async (uri: string, durationMs: number) => {
+    setSendingVoice(true);
+    try {
+      const a = await voiceAttachment(uri, durationMs);
+      let text: string;
+      try {
+        text = await transcribeVoice(store.settings, a);
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        a.voice = { durationMs, transcriptError: reason };
+        text = `[Voice message — transcription unavailable: ${reason}]`;
+      }
+      store.send(id, text, [a, ...pending]);
+      setPending([]);
+      setRecording(false);
+    } catch (e) {
+      Alert.alert("Couldn't send voice message", e instanceof Error ? e.message : String(e));
+    } finally {
+      setSendingVoice(false);
+    }
   };
 
   const pickCommand = (token: string) => {
@@ -134,7 +160,7 @@ export default function ChatScreen() {
             <View style={[styles.userBubble, { backgroundColor: theme.userBubble }]}>
               <CommandText text={item.displayText} />
             </View>
-          ) : !!item.content && (
+          ) : !!item.content && !item.attachments?.some((a) => a.voice?.transcriptError) && (
             <View style={[styles.userBubble, { backgroundColor: theme.userBubble }]}>
               <Text selectable style={{ color: theme.onUserBubble, fontSize: 16, lineHeight: 22 }}>
                 {item.content}
@@ -285,6 +311,9 @@ export default function ChatScreen() {
             style={[styles.input, { color: theme.text }]}
             accessibilityLabel="Message"
           />
+          {recording ? (
+            <VoiceRecorder onCancel={() => setRecording(false)} onSend={sendVoice} sending={sendingVoice} />
+          ) : (
           <View style={styles.composerRow}>
             <Pressable
               onPress={() => setAttachOpen(true)}
@@ -310,6 +339,17 @@ export default function ChatScreen() {
               >
                 <Icon name="square" size={14} color={theme.bg} />
               </Pressable>
+            ) : !canSend ? (
+              <Pressable
+                onPress={() => setRecording(true)}
+                disabled={attaching}
+                style={[styles.sendBtn, { backgroundColor: theme.surface2 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Record voice message"
+                hitSlop={4}
+              >
+                <Icon name="mic" size={20} color={theme.text} />
+              </Pressable>
             ) : (
               <Pressable
                 onPress={() => send()}
@@ -321,6 +361,7 @@ export default function ChatScreen() {
               </Pressable>
             )}
           </View>
+          )}
         </View>
       </View>
 
@@ -395,5 +436,5 @@ const styles = StyleSheet.create({
   composerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   roundBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   modelChip: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 40, maxWidth: 170, paddingHorizontal: 6 },
-  sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
 });

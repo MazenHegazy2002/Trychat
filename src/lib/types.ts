@@ -29,6 +29,8 @@ export interface Attachment {
   text?: string;
   /** Where it came from: sent by the user, made by the assistant, shared by a friend, or a project file. */
   origin?: 'upload' | 'assistant' | 'shared' | 'project';
+  /** Set for recorded voice notes (audio/mp4). The transcript is the message text. */
+  voice?: { durationMs: number; transcriptError?: string };
 }
 
 export type ToolStatus = 'pending' | 'running' | 'done' | 'denied' | 'error';
@@ -220,6 +222,8 @@ export interface Settings {
   memoryEnabled: boolean;
   stream: boolean;
   temperature: number;
+  /** Model for `/audio/transcriptions` (voice messages). Empty means whisper-1. */
+  transcriptionModel: string;
   /** How many of the most recent messages are sent with each request. */
   contextMessages: number;
   /** GitHub personal access token (secure storage). */
@@ -240,6 +244,8 @@ export interface Settings {
   subAgents: boolean;
   /** Let the model run JavaScript / Python on the phone. */
   codeExecution: boolean;
+  /** Let the model search the web and read pages (web.search / web.fetch). */
+  webAccess: boolean;
   /** Plugin marketplaces the user added to the Store ("owner/repo"). */
   marketplaces: string[];
   /** The folder on this phone the user shared with TryChat (phone.* tools). Device-only, never synced. */

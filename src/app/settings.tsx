@@ -161,6 +161,17 @@ export default function SettingsScreen() {
           {draft.model || 'Tap to choose a model'}
         </Text>
       </Pressable>
+      {label('Voice transcription model')}
+      <TextInput
+        value={draft.transcriptionModel}
+        onChangeText={(v) => set('transcriptionModel', v.trim())}
+        autoCapitalize="none"
+        autoCorrect={false}
+        placeholder="whisper-1"
+        placeholderTextColor={theme.muted}
+        style={inputStyle}
+        accessibilityLabel="Voice transcription model"
+      />
       {label(`Temperature: ${draft.temperature.toFixed(1)}`)}
       <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
         {[0, 0.3, 0.7, 1, 1.3].map((t) => (
@@ -210,6 +221,7 @@ export default function SettingsScreen() {
           ['memoryEnabled', 'Long-term memory', 'The model remembers facts about you across chats'],
           ['subAgents', 'Sub-agents', 'Let TryChat send helper agents to work on parts of a task in parallel'],
           ['codeExecution', 'Run code', 'Let TryChat run JavaScript and Python on your phone to calculate and test'],
+          ['webAccess', 'Web access', 'Let TryChat search the web and read pages and APIs'],
           ['stream', 'Stream responses', 'Show text as it is generated (turn off if your server does not support it)'],
         ] as const
       ).map(([key, title, desc]) => (

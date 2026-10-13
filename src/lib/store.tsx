@@ -6,6 +6,7 @@ import { runSubAgents } from './agents';
 import { deleteAttachmentFiles, messageContent } from './attachments';
 import { chat } from './api';
 import { uid } from './id';
+import { addToLibrary } from './library';
 import { carryOverSettings } from './pluginInstaller';
 import { buildApiMessages, extractMemoryOps, stripMemoryTags } from './prompt';
 import * as storage from './storage';
@@ -712,6 +713,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const model = convRef.current.find((c) => c.id === conversationId)?.model || settingsRef.current.model;
         const { result, files } = await runToolCall(call, { ...toolCtx(model), approval: { secrets: extra?.secrets } });
         call = { ...call, status: 'done', result, ...(files ? { files } : {}) };
+        files?.forEach((f) => addToLibrary(f, conversationId).catch(() => {}));
       } catch (e) {
         call = { ...call, status: 'error', result: e instanceof Error ? e.message : String(e) };
       }
@@ -764,6 +766,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...(attachments.length ? { attachments } : {}),
         ...(displayText ? { displayText } : {}),
       };
+      attachments.forEach((a) => addToLibrary(a, conversationId).catch(() => {}));
       if (conv.messages.length === 0) renameConversation(conversationId, titleFrom(displayText || text || attachments[0].name));
       await respond(conversationId, [...conv.messages, userMsg]);
     },
