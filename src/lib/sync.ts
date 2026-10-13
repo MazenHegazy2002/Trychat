@@ -1,3 +1,4 @@
+import { secretsToKeep, urlOrigin } from './plugins';
 import type { Account, Conversation, McpServer, Memory, Plugin, Project, Settings, Skill } from './types';
 
 /**
@@ -102,6 +103,24 @@ export function mergeList<T extends { id: string }>(
     else if (!local || item.updatedAt >= updatedAtOf(local)) byId.set(item.id, fromServer(item.data, local));
   }
   return [...byId.values()];
+}
+
+/**
+ * A plugin from the server. Its secrets never sync; this device's stay only where the synced copy still sends them
+ * to the same origins (see secretsToKeep), so a change made elsewhere can't redirect a device-only token.
+ */
+export function syncedPlugin(data: Plugin, local?: Plugin): Plugin {
+  return { ...data, secrets: local ? secretsToKeep(local, data) : undefined };
+}
+
+/**
+ * An MCP server from the server. Its token, headers and secret URL values never sync; this device's are kept only
+ * while the URL's origin is unchanged. A server new to this device, or whose origin changed, asks before every tool call.
+ */
+export function syncedMcpServer(data: McpServer, local?: McpServer): McpServer {
+  const { token: _token, headers: _headers, urlSecrets: _urlSecrets, ...rest } = data;
+  if (!local || urlOrigin(data.url) !== urlOrigin(local.url)) return { ...rest, confirm: true };
+  return { ...rest, token: local.token, headers: local.headers, urlSecrets: local.urlSecrets };
 }
 
 export function mergePrefs(settings: Settings, items: SyncItem[]): Settings {

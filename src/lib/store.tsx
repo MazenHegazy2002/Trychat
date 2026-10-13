@@ -304,12 +304,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       setSkills((list) => sync.mergeList(list, items, 'skills', (k) => k.updatedAt));
       setProjects((list) => sync.mergeList(list, items, 'projects', (p) => p.updatedAt));
-      setPlugins((list) =>
-        sync.mergeList(list, items, 'plugins', (p) => p.updatedAt, (data, local) => ({ ...data, secrets: local?.secrets })),
-      );
-      setMcpServers((list) =>
-        sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, (data, local) => ({ ...data, token: local?.token, headers: local?.headers, urlSecrets: local?.urlSecrets })),
-      );
+      setPlugins((list) => sync.mergeList(list, items, 'plugins', (p) => p.updatedAt, sync.syncedPlugin));
+      setMcpServers((list) => sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, sync.syncedMcpServer));
       const merged = sync.mergePrefs(settingsRef.current, items);
       if (merged !== settingsRef.current) {
         setSettings(merged);

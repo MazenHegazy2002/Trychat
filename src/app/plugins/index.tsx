@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel } from '../../components/ui';
 import type { IconName } from '../../components/ui';
-import { carryOverSettings, inspectGithubSource, installFromMarketplace } from '../../lib/pluginInstaller';
+import { carryOverSettings, inspectGithubSource, installFromMarketplace, marketplacePluginId } from '../../lib/pluginInstaller';
 import type { MarketplaceEntry, MarketplaceInfo } from '../../lib/pluginInstaller';
 import { findNameConflict, missingConfig, pluginOrigin } from '../../lib/plugins';
 import { useStore } from '../../lib/store';
@@ -120,7 +120,7 @@ export default function PluginsScreen() {
   };
 
   const installedFrom = (m: MarketplaceInfo, entry: MarketplaceEntry) =>
-    plugins.find((p) => (p.marketplace === m.name && p.name === entry.name) || p.id === `${entry.name}@${m.name}`);
+    plugins.find((p) => p.id === marketplacePluginId(m, entry));
 
   const installEntry = async (entry: MarketplaceEntry) => {
     if (!market || installingEntry) return;

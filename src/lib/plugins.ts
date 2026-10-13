@@ -1,3 +1,4 @@
+import { parseGithubLink } from './skills';
 import type { McpServer, Plugin, PluginCommand, Skill } from './types';
 
 /**
@@ -49,10 +50,67 @@ export function findNameConflict(plugins: Plugin[], candidate: Pick<Plugin, 'id'
   return plugins.find((p) => p.id !== candidate.id && p.name.toLowerCase() === name);
 }
 
-/** Where a plugin came from, for messages: its marketplace, else "owner/repo" from its id, else its link. */
+/**
+ * Where a plugin came from, for messages: the part of its id after "@" (an Anthropic marketplace's name, else the
+ * "owner/repo" it came from), else its marketplace or link. Not the marketplace's self-chosen name: any marketplace
+ * could call itself "claude-plugins-official".
+ */
 export function pluginOrigin(p: Plugin): string {
   const at = p.id.indexOf('@');
-  return p.marketplace ?? (at > 0 ? p.id.slice(at + 1) : p.source);
+  return at > 0 ? p.id.slice(at + 1) : (p.marketplace ?? p.source);
+}
+
+/** "scheme://host[:port]" of a URL or URL template, lowercased. Uses indexOf, so long input stays cheap. */
+export function urlOrigin(url: string | undefined): string {
+  const s = (url ?? '').trim();
+  const scheme = s.indexOf('://');
+  const start = scheme < 0 ? 0 : scheme + 3;
+  let end = s.length;
+  for (const c of ['/', '\\', '?', '#']) {
+    const i = s.indexOf(c, start);
+    if (i >= 0 && i < end) end = i;
+  }
+  return s.slice(0, end).toLowerCase();
+}
+
+/** "owner/repo" (lowercase) of a plugin's GitHub source link. */
+function sourceRepo(source: string | undefined): string | undefined {
+  if (!source || source.length > 4096) return undefined;
+  const ref = parseGithubLink(source);
+  return ref ? `${ref.owner}/${ref.repo}`.toLowerCase() : undefined;
+}
+
+/**
+ * Where a plugin sends setting `key`: the origins of its MCP servers whose URL or headers use ${user_config.key}.
+ * The other settings are filled into the URL first, so a changed host setting or default is a different origin.
+ */
+function destinations(plugin: Plugin, key: string): Set<string> {
+  const ref = `\${user_config.${key}}`;
+  const out = new Set<string>();
+  for (const m of plugin.mcpServers ?? []) {
+    if (m.url.includes(ref) || Object.values(m.headers ?? {}).some((v) => v.includes(ref))) {
+      out.add(urlOrigin(substituteConfig(m.url, { ...plugin, userConfig: plugin.userConfig ?? [], config: plugin.config ?? {} })));
+    }
+  }
+  return out;
+}
+
+/**
+ * Which of `secrets` (the device-only sensitive settings of `old`) may stay when `old` becomes `next` — an update,
+ * a reinstall, or a copy changed on another device: only when both come from the same GitHub repo, and only the
+ * secrets `next` sends to no origin `old` didn't already send them to. The rest are dropped, and the user enters
+ * them again. Otherwise a plugin that took over an id, or a synced copy whose MCP server points somewhere new,
+ * would send the user's tokens to a host they never gave them to.
+ */
+export function secretsToKeep(old: Plugin, next: Plugin, secrets: Record<string, string> | undefined = old.secrets): Record<string, string> {
+  const kept: Record<string, string> = {};
+  const repo = sourceRepo(old.source);
+  if (!secrets || !repo || repo !== sourceRepo(next.source)) return kept;
+  for (const [key, value] of Object.entries(secrets)) {
+    const before = destinations(old, key);
+    if ([...destinations(next, key)].every((origin) => before.has(origin))) kept[key] = value;
+  }
+  return kept;
 }
 
 /**

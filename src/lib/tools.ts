@@ -454,6 +454,24 @@ export function toolLabel(call: ToolCall, ctx?: ToolContext): string {
   return call.name;
 }
 
+/** Network access from the runner's WebView (or obvious ways to reach it indirectly), in either language. */
+const NETWORK_ANY = /\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts|sendBeacon|WebTransport|RTCPeerConnection|loadPyodide|pyodide\w*|ReactNativeWebView)\b|\bimport\s*\(/;
+const NETWORK_JS =
+  /\bnavigator\b|\bnew\s+Image\b|\blocation\b|\bopen\s*\(|\b(?:globalThis|window|self|frames|opener|document|eval|Function|Reflect|atob|fromCharCode|Worker|SharedWorker|serviceWorker)\b|\.\s*constructor\b|['"`]constructor['"`]|\[\s*(['"`])[^'"`\]]*\1\s*\+/;
+const NETWORK_PY =
+  /\b(pyfetch|open_url|urlopen|urllib\d*|requests|httpx|aiohttp|socket|ssl|micropip|importlib|builtins|__builtins__|__import__|__subclasses__|__globals__)\b|\bhttp\.client\b|\b(import|from)\s+js\b|\bjs\.|\bsys\.modules\b|\b(exec|eval|compile|globals)\s*\(/;
+
+/**
+ * Whether code for code.run may use the network. The runner's WebView can reach any host, so such code (or code
+ * that hides what it calls) needs the user's OK — text from a plugin or a web page could otherwise get the model
+ * to send the user's data anywhere. Plain computation runs without asking. A heuristic, not a sandbox.
+ */
+export function codeUsesNetwork(language: string, code: string): boolean {
+  const lang = normalizeLanguage(language);
+  if (NETWORK_ANY.test(code)) return true;
+  return (lang !== 'python' && NETWORK_JS.test(code)) || (lang !== 'javascript' && NETWORK_PY.test(code));
+}
+
 export function needsApproval(call: ToolCall, ctx: ToolContext): boolean {
   const def = getTools(ctx)[call.name];
   const s = ctx.settings;
@@ -467,6 +485,7 @@ export function needsApproval(call: ToolCall, ctx: ToolContext): boolean {
     case 'install':
       return true;
     case 'code':
+      return codeUsesNetwork(String(call.args.language ?? ''), String(call.args.code ?? ''));
     case 'agent':
       return false;
     default:

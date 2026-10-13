@@ -19,7 +19,7 @@ import {
 } from '../lib/catalog';
 import type { CatalogSource, RegistryServer, RemoteField } from '../lib/catalog';
 import { uid } from '../lib/id';
-import { inspectGithubSource, installFromMarketplace } from '../lib/pluginInstaller';
+import { inspectGithubSource, installFromMarketplace, marketplacePluginId } from '../lib/pluginInstaller';
 import type { MarketplaceEntry, MarketplaceInfo } from '../lib/pluginInstaller';
 import { findNameConflict, missingConfig, pluginOrigin } from '../lib/plugins';
 import { findSkills, importSkill, parseGithubLink } from '../lib/skills';
@@ -254,7 +254,8 @@ function MarketplacePage({ source, browser }: { source: CatalogSource; browser: 
   const { market, loading, error, query, setQuery, installing, setInstalling, close } = browser;
 
   const installedFrom = (m: MarketplaceInfo, entry: MarketplaceEntry) =>
-    plugins.find((p) => p.id === `${entry.name}@${m.name}` || (p.marketplace === m.name && p.name === entry.name));
+    // By id only: the id is scoped by the marketplace's real repo, while its declared name can be faked.
+    plugins.find((p) => p.id === marketplacePluginId(m, entry));
 
   /** Installs `plugin`, then offers to open its settings when it needs values to work. */
   const finishInstall = (plugin: Plugin) => {
@@ -269,7 +270,7 @@ function MarketplacePage({ source, browser }: { source: CatalogSource; browser: 
 
   const install = async (m: MarketplaceInfo, entry: MarketplaceEntry) => {
     if (installing) return;
-    setInstalling(`${entry.name}@${m.name}`);
+    setInstalling(marketplacePluginId(m, entry));
     try {
       const plugin = await installFromMarketplace(m, entry, settings.githubToken);
       // The same plugin from another marketplace or repo: their commands and tools would clash.
@@ -334,7 +335,7 @@ function MarketplacePage({ source, browser }: { source: CatalogSource; browser: 
       {!!market && !empty && (
         <Card style={{ marginTop: 12 }}>
           {shown.map((entry, i) => {
-            const id = `${entry.name}@${market.name}`;
+            const id = marketplacePluginId(market, entry);
             const installed = installedFrom(market, entry);
             const title = entry.displayName ?? entry.name;
             return (

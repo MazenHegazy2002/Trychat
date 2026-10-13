@@ -6,6 +6,7 @@ import type {
   PluginMcpServer,
   PluginSkill,
 } from './types';
+import { secretsToKeep } from './plugins';
 import { parseGithubLink } from './skills';
 
 /**
@@ -45,11 +46,14 @@ export interface MarketplaceEntry {
 }
 
 export interface MarketplaceInfo {
+  /** The name the marketplace gives itself (anyone can pick any name; see marketplaceScope). */
   name: string;
   description?: string;
   owner?: string;
   /** The link the user entered. */
   source: string;
+  /** The GitHub repo ("owner/repo") the marketplace was read from. */
+  repo: string;
   entries: MarketplaceEntry[];
 }
 
@@ -65,6 +69,18 @@ export const MAX_FILE_BYTES = 200 * 1024;
 export const MAX_ITEMS = 200;
 /** Parallel raw-file downloads. */
 const CONCURRENCY = 6;
+/** A plugin is stored and synced as one item: all its text together may not exceed this. */
+export const MAX_PLUGIN_TEXT = 3 * 1024 * 1024;
+/** Skill, command and agent descriptions go into every system prompt, so longer ones are cut. */
+export const MAX_DESCRIPTION = 1024;
+/** Skill, command, agent, plugin and MCP server names. */
+const MAX_NAME = 128;
+/** At most this many settings (userConfig fields, including ones made from ${VAR}s) per plugin. */
+export const MAX_CONFIG_FIELDS = 50;
+/** Links, URLs and header values longer than this aren't run through regexes (some patterns are quadratic). */
+const MAX_LINE = 4096;
+/** Marketplaces in this GitHub account (Anthropic's, see BUILTIN_MARKETPLACES) are scoped by their own name. */
+const TRUSTED_MARKETPLACE_OWNER = 'anthropics';
 
 const TOKEN_HINT = 'Add a GitHub token in Settings → Connections';
 
@@ -84,16 +100,25 @@ const strings = (v: unknown): string[] => toArray(v).filter((x): x is string => 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** Name usable in "/plugin:command" and "plugin:skill" (letters, digits, _ . -). */
+/** Name usable in "/plugin:command" and "plugin:skill" (letters, digits, _ . -; at most MAX_NAME characters). */
 function slug(name: string | undefined, lower = false): string | undefined {
   if (!name) return undefined;
   const s = (lower ? name.toLowerCase() : name)
     .trim()
+    .slice(0, MAX_NAME)
     .replace(/[^\w.-]+/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^[-.]+|[-.]+$/g, '');
-  return s || undefined;
+    .replace(/-{2,}/g, '-');
+  // Leading and trailing "-" and "." are cut with loops: /[-.]+$/ is quadratic on long runs.
+  const edge = (c: string) => c === '-' || c === '.';
+  let start = 0;
+  let end = s.length;
+  while (start < end && edge(s[start])) start++;
+  while (end > start && edge(s[end - 1])) end--;
+  return s.slice(start, end) || undefined;
 }
+
+/** Cuts `s` to `max` characters, ending in "…" when it was longer. */
+const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
 /** The link as the user entered it, trimmed and without a trailing slash or .git. */
 const cleanLink = (link: string) => link.trim().replace(/\/+$/, '').replace(/\.git$/i, '');
@@ -487,6 +512,14 @@ function splitFlow(inner: string): string[] {
   return out.map(unquote).filter(Boolean);
 }
 
+/** A plain value without its " # comment" (indexOf: /\s+#.*$/ is quadratic on long runs of spaces). */
+function stripComment(value: string): string {
+  for (let i = value.indexOf('#'); i > 0; i = value.indexOf('#', i + 1)) {
+    if (/\s/.test(value[i - 1])) return value.slice(0, i).trimEnd();
+  }
+  return value;
+}
+
 /**
  * Parses "---" front matter: `key: value`, quoted values, `[a, b]` and `- item` lists, multi-line
  * plain scalars and `|` / `>` block scalars. Nested maps are ignored.
@@ -535,7 +568,7 @@ export function parseFrontmatter(md: string): Frontmatter {
     } else if (/^\[[^[\]]*\]$/.test(value)) {
       data[key] = splitFlow(value.slice(1, -1));
     } else {
-      const first = value.replace(/\s+#.*$/, '');
+      const first = stripComment(value);
       data[key] = cont.length ? foldLines([first, ...cont]) : first;
     }
   }
@@ -769,6 +802,12 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
   const skillList = cap(skillFiles, 'skills');
   const commandList = cap(commandSpecs, 'commands');
   const agentList = cap(agentSpecs, 'agents');
+  // Fail before downloading when the listed sizes already exceed the budget (files over MAX_FILE_BYTES are skipped).
+  const planned = [...skillList, ...commandList.map((c) => c.path), ...agentList.map((a) => a.path)].reduce((n, p) => {
+    const size = p ? (tree.files.get(p) ?? 0) : 0;
+    return n + (size > MAX_FILE_BYTES ? 0 : size);
+  }, 0);
+  if (planned > MAX_PLUGIN_TEXT) throw tooLarge(name, planned);
   const [skillTexts, commandTexts, agentTexts] = await Promise.all([
     Promise.all(skillList.map(read)),
     Promise.all(commandList.map((c) => (c.path ? read(c.path) : Promise.resolve(c.content ?? '')))),
@@ -836,7 +875,8 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
   for (const item of toArray(m.mcpServers)) {
     if (typeof item === 'string') {
       const p = item.trim();
-      if (/\.(mcpb|dxt)$/i.test(p.replace(/[?#].*$/, ''))) bundles++;
+      if (p.length > MAX_LINE) notes.push('An MCP config path that is too long');
+      else if (/\.(mcpb|dxt)$/i.test(p.replace(/[?#].*$/, ''))) bundles++;
       else if (/^[a-z][\w+.-]*:\/\//i.test(p)) notes.push(`MCP servers from a URL (${p})`);
       else {
         const rp = pluginPath(root, p);
@@ -898,6 +938,10 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
         if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') headers[k] = String(v);
       }
     }
+    if (serverName.length > MAX_NAME || url.length > MAX_LINE || Object.values(headers).some((v) => v.length > MAX_LINE)) {
+      notes.push(`MCP server “${clip(serverName, MAX_NAME)}” (name, URL or header too long)`);
+      continue;
+    }
     if (needsLocalFiles.test(url) || Object.values(headers).some((v) => needsLocalFiles.test(v))) {
       notes.push(`MCP server “${serverName}” (uses the plugin’s local files)`);
       continue;
@@ -913,6 +957,15 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
     };
     if (Object.keys(headers).length) server.headers = headers;
     mcpServers.push(server);
+  }
+
+  if (userConfig.length > MAX_CONFIG_FIELDS) {
+    throw new Error(`“${name}” can’t be installed: it asks for ${userConfig.length} settings (at most ${MAX_CONFIG_FIELDS} are allowed).`);
+  }
+  // Names and descriptions of skills, commands and agents go into every system prompt.
+  for (const x of [...skills, ...commands, ...agents]) {
+    x.name = clip(x.name, MAX_NAME);
+    x.description = clip(x.description, MAX_DESCRIPTION);
   }
 
   // --- Parts a phone can't run ---------------------------------------------------------------
@@ -969,7 +1022,16 @@ async function parsePlugin(ctx: Ctx, input: ParseInput): Promise<Plugin> {
   if (author) plugin.author = author;
   if (homepage) plugin.homepage = homepage;
   if (input.marketplace) plugin.marketplace = input.marketplace;
+  const size = JSON.stringify(plugin).length;
+  if (size > MAX_PLUGIN_TEXT) throw tooLarge(plugin.displayName ?? name, size);
   return plugin;
+}
+
+function tooLarge(name: string, size: number): Error {
+  const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return new Error(
+    `“${name}” is too large to install: its skills, commands, agents and settings add up to ${mb(size)} (the limit is ${mb(MAX_PLUGIN_TEXT)} per plugin).`,
+  );
 }
 
 /** Folders with a plugin.json, SKILL.md, .mcp.json, hooks, or skills/commands/agents content. */
@@ -1011,6 +1073,7 @@ const OUTSIDE = 'Its folder is outside the marketplace (".." isn’t allowed).';
 
 function fromGitUrl(url: string, ref?: string): Resolved {
   const u = url.trim();
+  if (u.length > MAX_LINE) return { reason: 'Its repository link is too long.' };
   const ssh = u.match(/^(?:ssh:\/\/)?git@github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
   if (ssh) return { target: { owner: ssh[1], repo: ssh[2], ref, path: '' } };
   if (/^(?:https?:\/\/)?(?:www\.)?github\.com\//i.test(u) || /^[\w.-]+\/[\w.-]+$/.test(u)) {
@@ -1105,7 +1168,7 @@ async function readMarketplace(ctx: Ctx, tree: RepoTree, dir: string, source: st
     if ('reason' in resolved) entry.reason = resolved.reason;
     entries.push(entry);
   }
-  const info: MarketplaceInfo = { name: str(json.name) ?? tree.repo, source, entries };
+  const info: MarketplaceInfo = { name: str(json.name) ?? tree.repo, source, repo: `${tree.owner}/${tree.repo}`, entries };
   const description = str(json.description) ?? str(metadata.description);
   const owner = str(json.owner) ?? (isObj(json.owner) ? str(json.owner.name) : undefined);
   if (description) info.description = description;
@@ -1141,11 +1204,29 @@ async function installEntry(ctx: Ctx, marketplace: MarketplaceInfo, entry: Marke
     root: target.path,
     entry: raw.synthetic ? undefined : raw.entry,
     fallbackName: entry.name,
-    fixedName: entry.name,
-    idScope: marketplace.name,
+    fixedName: entryPluginName(entry),
+    idScope: marketplaceScope(marketplace),
     marketplace: raw.synthetic ? undefined : marketplace.name,
     source: marketplace.source,
   });
+}
+
+const entryPluginName = (entry: Pick<MarketplaceEntry, 'name'>) => slug(entry.name) ?? 'plugin';
+
+/**
+ * The part after "@" in the ids of a marketplace's plugins. A marketplace names itself, so only Anthropic's repos
+ * (which host the built-in marketplaces) are scoped by that name, keeping their ids stable; any other marketplace
+ * is scoped by its "owner/repo". Otherwise a marketplace calling itself "claude-plugins-official" could install a
+ * "github" plugin over the real one and inherit its settings and secrets.
+ */
+export function marketplaceScope(marketplace: Pick<MarketplaceInfo, 'name' | 'repo'>): string {
+  const owner = marketplace.repo.split('/')[0].toLowerCase();
+  return owner === TRUSTED_MARKETPLACE_OWNER ? marketplace.name : marketplace.repo;
+}
+
+/** The id an entry installs as. Use it to check whether an entry is already installed. */
+export function marketplacePluginId(marketplace: Pick<MarketplaceInfo, 'name' | 'repo'>, entry: Pick<MarketplaceEntry, 'name'>): string {
+  return `${entryPluginName(entry)}@${marketplaceScope(marketplace)}`;
 }
 
 /** A link into a marketplace's plugin folder installs that entry (same id as installing it from the list). */
@@ -1209,7 +1290,7 @@ async function discoverPlugins(ctx: Ctx, tree: RepoTree, dir: string, source: st
       return entry;
     }),
   );
-  return { name: `${tree.owner}/${tree.repo}`, owner: tree.owner, source, entries };
+  return { name: `${tree.owner}/${tree.repo}`, owner: tree.owner, source, repo: `${tree.owner}/${tree.repo}`, entries };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1276,11 +1357,12 @@ export async function installFromMarketplace(
 /**
  * The settings to keep when an installed plugin is reinstalled or updated to `next`: values the
  * user set (not the old version's defaults) for keys `next` still declares. A value whose key became
- * sensitive moves to the device-only secrets; old secrets stay only for keys that are still sensitive.
+ * sensitive moves to the device-only secrets; old secrets stay only for keys that are still sensitive, and only
+ * when `next` comes from the same repo and sends them to no new origin (see secretsToKeep).
  */
 export function carryOverSettings(old: Plugin, next: Plugin): Pick<Plugin, 'config' | 'secrets'> {
   const config = { ...next.config };
-  const secrets: Record<string, string> = { ...next.secrets };
+  const carried: Record<string, string> = {};
   const text = (v: string | number | boolean | string[]) => (Array.isArray(v) ? v.join(',') : String(v));
   for (const f of next.userConfig) {
     const before = old.userConfig.find((o) => o.key === f.key);
@@ -1289,10 +1371,10 @@ export function carryOverSettings(old: Plugin, next: Plugin): Pick<Plugin, 'conf
     if (!f.sensitive) {
       if (userSet) config[f.key] = value;
     } else if (old.secrets?.[f.key]) {
-      secrets[f.key] = old.secrets[f.key];
+      carried[f.key] = old.secrets[f.key];
     } else if (userSet && text(value) !== '') {
-      secrets[f.key] = text(value);
+      carried[f.key] = text(value);
     }
   }
-  return { config, secrets };
+  return { config, secrets: { ...next.secrets, ...secretsToKeep(old, { ...next, config }, carried) } };
 }

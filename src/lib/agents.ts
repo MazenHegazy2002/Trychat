@@ -46,7 +46,8 @@ async function runOne(ctx: ToolContext, defaultModel: string, { task, model, age
     const { call, before } = parseToolCall(text, subCtx);
     if (!call) return text.trim();
     messages.push({ role: 'assistant', content: `${before}\n\n${formatToolCall(call)}`.trim() });
-    if (call.status === 'pending' && safe(call.name)) {
+    // Checked with the real arguments: code.run needs approval (so isn't allowed here) when the code uses the network.
+    if (call.status === 'pending' && call.name !== 'agents.run' && !needsApproval(call, ctx)) {
       try {
         call.result = await runTool(call, subCtx);
         call.status = 'done';
@@ -56,7 +57,10 @@ async function runOne(ctx: ToolContext, defaultModel: string, { task, model, age
       }
     } else if (call.status === 'pending') {
       call.status = 'error';
-      call.result = 'Sub-agents cannot use this tool. Finish with what you have, or say what the main assistant should do.';
+      call.result =
+        call.name === 'code.run'
+          ? 'Sub-agents can only run code that doesn’t use the network. Finish with what you have, or say what the main assistant should do.'
+          : 'Sub-agents cannot use this tool. Finish with what you have, or say what the main assistant should do.';
     }
     messages.push({ role: 'user', content: formatToolResult(call) });
   }

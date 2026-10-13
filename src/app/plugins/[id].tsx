@@ -6,7 +6,7 @@ import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, TextInp
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, SectionLabel } from '../../components/ui';
-import { missingConfig, substituteConfig } from '../../lib/plugins';
+import { missingConfig, substituteConfig, pluginOrigin } from '../../lib/plugins';
 import { useStore } from '../../lib/store';
 import { useTheme } from '../../lib/theme';
 import type { Plugin, PluginConfigField } from '../../lib/types';
@@ -323,7 +323,7 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 8 }}>
           {!!plugin.version && <Chip>v{plugin.version}</Chip>}
           {!!plugin.marketplace && (
-            <Text style={{ color: theme.muted, fontSize: 13 }}>From the {plugin.marketplace} marketplace</Text>
+            <Text style={{ color: theme.muted, fontSize: 13 }}>From {pluginOrigin(plugin)}</Text>
           )}
         </View>
       )}
