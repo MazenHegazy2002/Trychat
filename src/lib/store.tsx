@@ -151,6 +151,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   accountRef.current = account;
   busyRef.current = busy;
 
+  /** Sync state persisted next to the snapshot (loaded on first use); deletions noted since. */
+  const syncMetaRef = useRef<sync.SyncMeta | null>(null);
+  const deletedRef = useRef<Record<string, number>>({});
+  const loadSyncMeta = useCallback(async () => {
+    if (!syncMetaRef.current) {
+      const m = await storage.loadSyncMeta();
+      syncMetaRef.current ??= m;
+    }
+    return syncMetaRef.current;
+  }, []);
+
+  /** Notes when items were deleted here, so the deletion carries that time (not the next sync's). */
+  const markDeleted = useCallback(
+    (collection: sync.Collection, ids: string[]) => {
+      if (!ids.length) return;
+      deletedRef.current = sync.noteDeleted({ deletedAt: deletedRef.current, messages: {} }, collection, ids).deletedAt;
+      void loadSyncMeta().then((m) => {
+        syncMetaRef.current = { ...m, deletedAt: { ...m.deletedAt, ...deletedRef.current } };
+        return storage.saveSyncMeta(syncMetaRef.current);
+      });
+    },
+    [loadSyncMeta],
+  );
+
   useEffect(() => {
     Promise.all([
       storage.loadSettings(),
@@ -255,88 +279,127 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [ready, mcpKey, refreshMcpTools]);
 
   const saveMcpServer = useCallback((server: McpServer) => {
-    const next = { ...server, updatedAt: Date.now() };
+    const next = { ...server, updatedAt: sync.stamp(server.updatedAt) };
     setMcpServers((list) => (list.some((x) => x.id === server.id) ? list.map((x) => (x.id === server.id ? next : x)) : [...list, next]));
   }, []);
 
   const deleteMcpServer = useCallback((id: string) => {
+    markDeleted('mcpServers', [id]);
     setMcpServers((list) => list.filter((x) => x.id !== id));
-  }, []);
+  }, [markDeleted]);
 
   // ---------- Skills ----------
 
   const saveSkill = useCallback((skill: Skill) => {
-    const next = { ...skill, updatedAt: Date.now() };
+    const next = { ...skill, updatedAt: sync.stamp(skill.updatedAt) };
     setSkills((list) => (list.some((x) => x.id === skill.id) ? list.map((x) => (x.id === skill.id ? next : x)) : [...list, next]));
   }, []);
 
   const deleteSkill = useCallback((id: string) => {
+    markDeleted('skills', [id]);
     setSkills((list) => list.filter((x) => x.id !== id));
-  }, []);
+  }, [markDeleted]);
 
   // ---------- Account & sync ----------
 
-  const syncing = useRef(false);
-
-  const syncNow = useCallback(async () => {
+  /** The sync in progress, if any (sign-out waits for it, then runs a final one). */
+  const syncing = useRef<Promise<void> | null>(null);
+  const runSync = useCallback(async () => {
     const acct = accountRef.current;
-    if (!acct || syncing.current) return;
-    syncing.current = true;
+    if (!acct) return;
+    const current = () => accountRef.current?.token === acct.token;
     setSyncStatus({ state: 'syncing' });
     try {
       const snapshot = await storage.loadSyncSnapshot();
-      const state: sync.SyncState = {
-        memories: memRef.current,
-        conversations: convRef.current.filter((c) => !busyRef.current[c.id]), // don't upload half-streamed replies
-        skills: skillsRef.current,
-        mcpServers: mcpRef.current,
-        projects: projectsRef.current,
-        plugins: pluginsRef.current,
-        settings: settingsRef.current,
+      const meta = await loadSyncMeta();
+      const applyServerItems = async (items: sync.SyncItem[]) => {
+        setMemories((list) => sync.mergeList(list, items, 'memories', (m) => m.updatedAt ?? m.createdAt));
+        setConversations((list) => {
+          const merged = sync.mergeList(list, items, 'conversations', (c) => c.updatedAt);
+          return merged === list ? list : merged.sort((x, y) => y.updatedAt - x.updatedAt); // same array = no re-sync
+        });
+        setSkills((list) => sync.mergeList(list, items, 'skills', (k) => k.updatedAt));
+        setProjects((list) => sync.mergeList(list, items, 'projects', (p) => p.updatedAt));
+        setPlugins((list) =>
+          sync.mergeList(list, items, 'plugins', (p) => p.updatedAt, sync.syncedPlugin),
+        );
+        setMcpServers((list) =>
+          sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, sync.syncedMcpServer),
+        );
+        const merged = sync.mergePrefs(settingsRef.current, items);
+        if (merged !== settingsRef.current) {
+          settingsRef.current = merged;
+          setSettings(merged);
+          await storage.saveSettings(merged);
+        }
       };
-      const busyKeys = new Set(Object.keys(busyRef.current).map((id) => `conversations/${id}`));
-      const changes = sync.pendingChanges(state, snapshot).filter((c) => !busyKeys.has(`${c.collection}/${c.id}`));
-      const { cursor, items } = await sync.pushPull(acct, changes);
-
-      setMemories((list) => sync.mergeList(list, items, 'memories', (m) => m.updatedAt ?? m.createdAt));
-      setConversations((list) => {
-        const merged = sync.mergeList(list, items, 'conversations', (c) => c.updatedAt);
-        return merged === list ? list : merged.sort((x, y) => y.updatedAt - x.updatedAt); // same array = no re-sync
+      const result = await sync.runSync(acct, snapshot, meta, {
+        read: () => ({
+          state: {
+            memories: memRef.current,
+            conversations: convRef.current,
+            skills: skillsRef.current,
+            mcpServers: mcpRef.current,
+            projects: projectsRef.current,
+            plugins: pluginsRef.current,
+            settings: settingsRef.current,
+          },
+          busy: busyRef.current,
+          deletedAt: { ...syncMetaRef.current?.deletedAt, ...deletedRef.current },
+        }),
+        current,
+        apply: applyServerItems,
+        save: async (snap, m, next) => {
+          if (!current()) return;
+          // Deletion times are only needed until the server confirmed the tombstone.
+          const keep = (d: Record<string, number>) => Object.fromEntries(Object.entries(d).filter(([k]) => snap[k] !== undefined));
+          deletedRef.current = keep(deletedRef.current);
+          syncMetaRef.current = { messages: m.messages, deletedAt: keep({ ...syncMetaRef.current?.deletedAt, ...deletedRef.current }) };
+          accountRef.current = next;
+          setAccount(next);
+          await Promise.all([storage.saveSyncSnapshot(snap), storage.saveSyncMeta(syncMetaRef.current), storage.saveAccount(next)]);
+        },
       });
-      setSkills((list) => sync.mergeList(list, items, 'skills', (k) => k.updatedAt));
-      setProjects((list) => sync.mergeList(list, items, 'projects', (p) => p.updatedAt));
-      setPlugins((list) => sync.mergeList(list, items, 'plugins', (p) => p.updatedAt, sync.syncedPlugin));
-      setMcpServers((list) => sync.mergeList(list, items, 'mcpServers', (x) => x.updatedAt, sync.syncedMcpServer));
-      const merged = sync.mergePrefs(settingsRef.current, items);
-      if (merged !== settingsRef.current) {
-        setSettings(merged);
-        await storage.saveSettings(merged);
-      }
-
-      await storage.saveSyncSnapshot(sync.nextSnapshot(snapshot, changes, items));
-      const next = { ...acct, cursor, lastSyncAt: Date.now() };
+      if (!result || !current()) return;
+      const next = { ...result.account, lastSyncAt: Date.now() };
+      accountRef.current = next;
       setAccount(next);
       await storage.saveAccount(next);
-      setSyncStatus({ state: 'idle' });
+      setSyncStatus(result.problems.length ? { state: 'error', error: result.problems.join('\n') } : { state: 'idle' });
     } catch (e: any) {
+      if (!current()) return;
       if (e?.status === 401) {
         setAccount(null);
+        accountRef.current = null;
         await storage.saveAccount(null);
       }
       setSyncStatus({ state: 'error', error: e instanceof Error ? e.message : String(e) });
-    } finally {
-      syncing.current = false;
     }
-  }, []);
+  }, [loadSyncMeta]);
+
+  /** Starts a sync, or returns the one already running. */
+  const syncNow = useCallback(() => {
+    if (!syncing.current) {
+      syncing.current = runSync().finally(() => {
+        syncing.current = null;
+      });
+    }
+    return syncing.current;
+  }, [runSync]);
 
   const signIn = useCallback(
     async (serverUrl: string, mode: 'signin' | 'signup', form: { email: string; password: string; name?: string }) => {
       const acct = await sync.signIn(serverUrl, mode, form);
+      await syncing.current; // a sync of the previous account must not save over this one
       // A different account starts from a clean sync state; this device's data is merged into it.
       await storage.saveSyncSnapshot({});
+      syncMetaRef.current = { deletedAt: {}, messages: {} };
+      deletedRef.current = {};
+      await storage.saveSyncMeta(syncMetaRef.current);
       setAccount(acct);
       accountRef.current = acct;
       await storage.saveAccount(acct);
+      await storage.saveLastAccountEmail(acct.user.email);
       await syncNow();
     },
     [syncNow],
@@ -344,12 +407,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const acct = accountRef.current;
-    if (acct) await syncNow();
-    if (acct) await sync.signOut(acct);
+    if (acct) {
+      await syncing.current; // finish the sync in flight, then a final one for the latest edits
+      await syncNow();
+      await sync.signOut(acct);
+    }
     setAccount(null);
     accountRef.current = null;
     await storage.saveAccount(null);
     await storage.saveSyncSnapshot({});
+    syncMetaRef.current = { deletedAt: {}, messages: {} };
+    deletedRef.current = {};
+    await storage.saveSyncMeta(syncMetaRef.current);
   }, [syncNow]);
 
   // Sync shortly after any change, every minute, and when the app comes back to the foreground.
@@ -377,8 +446,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateSettings = useCallback(async (input: Partial<Settings> | ((prev: Settings) => Partial<Settings>)) => {
     const patch = typeof input === 'function' ? input(settingsRef.current) : input;
-    const touchesPrefs = Object.keys(patch).some((k) => (sync.SYNCED_PREFS as readonly string[]).includes(k));
-    const next = { ...settingsRef.current, ...patch, ...(touchesPrefs ? { prefsUpdatedAt: Date.now() } : {}) };
+    const next = { ...settingsRef.current, ...patch, ...sync.touchPrefs(settingsRef.current, Object.keys(patch)) };
     settingsRef.current = next;
     setSettings(next);
     await storage.saveSettings(next);
@@ -409,7 +477,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             enabled: old.enabled,
             ...carryOverSettings(old, plugin),
             installedAt: old.installedAt,
-            updatedAt: now,
+            updatedAt: sync.stamp(old.updatedAt),
           }
         : { ...plugin, updatedAt: now };
       return old ? list.map((p) => (p.id === plugin.id ? next : p)) : [next, ...list];
@@ -417,12 +485,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updatePlugin = useCallback((plugin: Plugin) => {
-    setPlugins((list) => list.map((p) => (p.id === plugin.id ? { ...plugin, updatedAt: Date.now() } : p)));
+    setPlugins((list) => list.map((p) => (p.id === plugin.id ? { ...plugin, updatedAt: sync.stamp(plugin.updatedAt) } : p)));
   }, []);
 
   const uninstallPlugin = useCallback((id: string) => {
+    markDeleted('plugins', [id]);
     setPlugins((list) => list.filter((p) => p.id !== id));
-  }, []);
+  }, [markDeleted]);
 
   /** Lists an MCP server's tools now, so the reply that installed it can use them in its next step. */
   const discoverTools = async (server: McpServer): Promise<string> => {
@@ -443,20 +512,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // (which runs before React re-renders) already sees the new skills, commands and tools.
   installRef.current = async (item: InstallItem): Promise<string> => {
     if (item.kind === 'skill') {
-      const skill = { ...item.skill, updatedAt: Date.now() };
+      const skill = { ...item.skill, updatedAt: sync.stamp(item.skill.updatedAt) };
       saveSkill(skill);
       skillsRef.current = [...skillsRef.current.filter((k) => k.id !== skill.id), skill];
       return `Installed the skill "${skill.name}". Load it with skills.read.`;
     }
     if (item.kind === 'mcp') {
-      const server = { ...item.server, updatedAt: Date.now() };
+      const server = { ...item.server, updatedAt: sync.stamp(item.server.updatedAt) };
       saveMcpServer(server);
       mcpRef.current = [...mcpRef.current.filter((x) => x.id !== server.id), server];
       return `Added the MCP server. ${await discoverTools(server)}`;
     }
     const plugin = item.plugin;
     installPlugin(plugin);
-    pluginsRef.current = [{ ...plugin, updatedAt: Date.now() }, ...pluginsRef.current.filter((p) => p.id !== plugin.id)];
+    pluginsRef.current = [{ ...plugin, updatedAt: sync.stamp(plugin.updatedAt) }, ...pluginsRef.current.filter((p) => p.id !== plugin.id)];
     const servers = pluginMcpServers([plugin]);
     const found = await Promise.all(servers.map(discoverTools));
     const parts = [
@@ -469,45 +538,47 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   };
 
   const saveProject = useCallback((project: Project) => {
-    const next = { ...project, updatedAt: Date.now() };
+    const next = { ...project, updatedAt: sync.stamp(project.updatedAt) };
     setProjects((list) => (list.some((p) => p.id === project.id) ? list.map((p) => (p.id === project.id ? next : p)) : [next, ...list]));
   }, []);
 
   const deleteProject = useCallback((id: string) => {
     deleteAttachmentFiles(projectsRef.current.find((p) => p.id === id)?.files);
+    markDeleted('projects', [id]);
     setProjects((list) => list.filter((p) => p.id !== id));
-    const now = Date.now();
     setConversations((list) =>
-      list.map((c) => (c.projectId === id ? { ...c, projectId: undefined, updatedAt: now } : c)),
+      list.map((c) => (c.projectId === id ? { ...c, projectId: undefined, updatedAt: sync.stamp(c.updatedAt) } : c)),
     );
-  }, []);
+  }, [markDeleted]);
 
   const moveConversation = useCallback(
     (conversationId: string, projectId: string | undefined) =>
-      patchConversation(conversationId, (c) => ({ ...c, projectId, updatedAt: Date.now() })),
+      patchConversation(conversationId, (c) => ({ ...c, projectId, updatedAt: sync.stamp(c.updatedAt) })),
     [patchConversation],
   );
 
   const deleteConversation = useCallback((id: string) => {
     controllers.current[id]?.abort();
     deleteAttachmentFiles(convRef.current.find((c) => c.id === id)?.messages.flatMap((m) => m.attachments ?? []));
+    markDeleted('conversations', [id]);
     setConversations((list) => list.filter((c) => c.id !== id));
-  }, []);
+  }, [markDeleted]);
 
   const renameConversation = useCallback(
-    (id: string, title: string) => patchConversation(id, (c) => ({ ...c, title, updatedAt: Date.now() })),
+    (id: string, title: string) => patchConversation(id, (c) => ({ ...c, title, updatedAt: sync.stamp(c.updatedAt) })),
     [patchConversation],
   );
 
   const setConversationModel = useCallback(
-    (id: string, model: string) => patchConversation(id, (c) => ({ ...c, model, updatedAt: Date.now() })),
+    (id: string, model: string) => patchConversation(id, (c) => ({ ...c, model, updatedAt: sync.stamp(c.updatedAt) })),
     [patchConversation],
   );
 
   const clearConversations = useCallback(() => {
     Object.values(controllers.current).forEach((c) => c.abort());
+    markDeleted('conversations', convRef.current.map((c) => c.id));
     setConversations([]);
-  }, []);
+  }, [markDeleted]);
 
   const applyMemoryOps = useCallback((raw: string) => {
     const { remember, forget } = extractMemoryOps(raw);
@@ -517,6 +588,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       let next = list.filter(
         (m) => !forget.some((f) => lower(m.text) === lower(f) || lower(m.text).includes(lower(f))),
       );
+      markDeleted('memories', list.filter((m) => !next.includes(m)).map((m) => m.id));
       for (const text of remember) {
         if (!next.some((m) => lower(m.text) === lower(text))) {
           next = [...next, { id: uid(), text, createdAt: Date.now() }];
@@ -524,7 +596,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-  }, []);
+  }, [markDeleted]);
 
   const endBusy = useCallback((conversationId: string) => {
     delete controllers.current[conversationId];
@@ -550,14 +622,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const setAssistant = (patch: Partial<ChatMessage>) =>
         patchConversation(conversationId, (c) => ({
           ...c,
-          updatedAt: Date.now(),
+          updatedAt: sync.stamp(c.updatedAt),
           messages: c.messages.map((m) => (m.id === assistant.id ? { ...m, ...patch } : m)),
         }));
 
       patchConversation(conversationId, (c) => ({
         ...c,
         messages: [...history, assistant],
-        updatedAt: Date.now(),
+        updatedAt: sync.stamp(c.updatedAt),
       }));
 
       if (!model) {
@@ -720,14 +792,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateMemory = useCallback((id: string, text: string) => {
-    setMemories((list) => list.map((m) => (m.id === id ? { ...m, text, updatedAt: Date.now() } : m)));
+    setMemories((list) => list.map((m) => (m.id === id ? { ...m, text, updatedAt: sync.stamp(m.updatedAt ?? m.createdAt) } : m)));
   }, []);
 
   const deleteMemory = useCallback((id: string) => {
+    markDeleted('memories', [id]);
     setMemories((list) => list.filter((m) => m.id !== id));
-  }, []);
+  }, [markDeleted]);
 
-  const clearMemories = useCallback(() => setMemories([]), []);
+  const clearMemories = useCallback(() => {
+    markDeleted('memories', memRef.current.map((m) => m.id));
+    setMemories([]);
+  }, [markDeleted]);
 
   return (
     <StoreContext.Provider

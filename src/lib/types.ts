@@ -203,6 +203,10 @@ export interface Account {
   /** Sync cursor (server sequence number) and when we last synced. */
   cursor: number;
   lastSyncAt?: number;
+  /** The collections the server confirmed it syncs for this cursor (missing: an older build's cursor). */
+  collections?: string[];
+  /** The server accepts chats as a changed tail of messages instead of the whole chat. */
+  patches?: boolean;
 }
 
 export interface Settings {
@@ -242,6 +246,8 @@ export interface Settings {
   phoneFolder: PhoneFolder | null;
   /** When synced preferences last changed (drives last-write-wins across devices). */
   prefsUpdatedAt?: number;
+  /** When each synced preference last changed, so changes to different ones on two devices both survive. */
+  prefsKeyUpdatedAt?: Record<string, number>;
 }
 
 /** A folder on this phone the user granted TryChat access to. */

@@ -5,6 +5,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Card, Divider, Icon, PillButton, SectionLabel } from '../components/ui';
 import type { IconName } from '../components/ui';
+import * as storage from '../lib/storage';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 
@@ -115,7 +116,7 @@ function SignedIn() {
 
 function SignInForm() {
   const theme = useTheme();
-  const { signIn } = useStore();
+  const { signIn, memories, conversations, skills, projects, mcpServers, plugins } = useStore();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [server, setServer] = useState(DEFAULT_SERVER);
   const [editingServer, setEditingServer] = useState(false);
@@ -128,7 +129,22 @@ function SignInForm() {
   const input = [styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }];
   const label = (t: string) => <Text style={[styles.label, { color: theme.muted }]}>{t}</Text>;
 
+  /** Signing in to another account than this phone last used would add this phone's data to it: ask first. */
+  const confirmMerge = async (): Promise<boolean> => {
+    const target = email.trim().toLowerCase();
+    const last = await storage.loadLastAccountEmail();
+    const hasData = [memories, conversations, skills, projects, mcpServers, plugins].some((l) => l.length > 0);
+    if (!last || !hasData || last.toLowerCase() === target) return true;
+    return new Promise((resolve) =>
+      Alert.alert(`Add this phone’s chats and memory to ${target}?`, `They were last synced with ${last}.`, [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Add them', onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) }),
+    );
+  };
+
   const submit = async () => {
+    if (!(await confirmMerge())) return;
     setWorking(true);
     setError('');
     try {

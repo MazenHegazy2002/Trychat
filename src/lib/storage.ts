@@ -3,6 +3,8 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 import { docStore } from './docStore';
+import { EMPTY_META } from './sync';
+import type { SyncMeta } from './sync';
 import type { Account, Conversation, McpServer, Memory, Plugin, Project, Settings, Skill } from './types';
 
 /**
@@ -610,3 +612,9 @@ export async function saveSyncSnapshot(s: Record<string, number>): Promise<void>
   if (!Object.keys(s).length) held = {};
   await writeJson(KEYS.syncSnapshot, { ...held, ...s });
 }
+/** When local deletions happened and the fingerprints of synced chats (see sync.ts SyncMeta). */
+export const loadSyncMeta = () => readJson<SyncMeta>('trychat.syncMeta', EMPTY_META);
+export const saveSyncMeta = (m: SyncMeta) => writeJson('trychat.syncMeta', m);
+/** The email of the account this phone last synced with (kept after signing out). */
+export const loadLastAccountEmail = () => readJson<string | null>('trychat.lastAccountEmail', null);
+export const saveLastAccountEmail = (email: string) => writeJson('trychat.lastAccountEmail', email);

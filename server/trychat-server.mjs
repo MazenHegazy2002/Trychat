@@ -64,6 +64,7 @@ const PORT = Number(args.port ?? process.env.PORT ?? 8787);
 const DATA_DIR = path.resolve(args.data ?? process.env.TRYCHAT_DATA ?? './trychat-data');
 const ALLOW_SIGNUP = (args.signup ?? process.env.TRYCHAT_ALLOW_SIGNUP ?? 'true') !== 'false';
 const MAX_BODY = 20 * 1024 * 1024;
+const MAX_ITEM = MAX_BODY - 64 * 1024;
 const COLLECTIONS = new Set(['memories', 'conversations', 'skills', 'mcpServers', 'projects', 'plugins', 'prefs']);
 // What app builds from before the client sent its `collections` list know about. They are only sent
 // and only allowed to change these: an older build treats an item it can't store as deleted locally
@@ -101,7 +102,7 @@ function writeJson(file, value) {
   const prev = writeQueue.get(file) ?? Promise.resolve();
   const next = prev.then(async () => {
     const tmp = `${file}.${process.pid}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(value));
+    await fs.writeFile(tmp, JSON.stringify(value), { mode: 0o600 });
     await fs.rename(tmp, file);
   });
   writeQueue.set(file, next.catch(() => {}));
@@ -112,18 +113,60 @@ const indexFile = () => path.join(DATA_DIR, 'accounts.json');
 const userFile = (id) => path.join(DATA_DIR, `user-${id}.json`);
 
 // In-memory cache, persisted on every change.
+// The pending load promise is cached, so concurrent first requests after a restart share one object
+// (otherwise the second read replaces the object the first one already wrote to).
 let index = null; // { users: {id: {...}}, emails: {email: id}, sessions: {tokenHash: {userId, createdAt}} }
-const users = new Map(); // id -> { items: { "collection/id": {collection,id,data,updatedAt,deleted,seq} }, seq }
+let indexLoading = null;
+const users = new Map(); // id -> Promise<{ items: { "collection/id": {collection,id,data,updatedAt,deleted,seq} }, seq }>
 
 async function loadIndex() {
-  if (!index) index = await readJson(indexFile(), { users: {}, emails: {}, sessions: {} });
+  if (!index) {
+    indexLoading ??= readJson(indexFile(), { users: {}, emails: {}, sessions: {} }).finally(() => (indexLoading = null));
+    const loaded = await indexLoading;
+    index ??= loaded;
+  }
   return index;
 }
 
-async function loadUser(id) {
-  if (!users.has(id)) users.set(id, await readJson(userFile(id), { items: {}, seq: 0 }));
+function loadUser(id) {
+  if (!users.has(id)) {
+    const p = readJson(userFile(id), { items: {}, seq: 0 });
+    users.set(id, p);
+    p.catch(() => users.get(id) === p && users.delete(id));
+  }
   return users.get(id);
 }
+
+const PREF_TIMES = 'updatedAtByKey';
+/** Merges two prefs items key by key (newest key wins). Items without per-key times (older apps) use the item's time. */
+function mergePrefsData(a, b) {
+  const ta = a.data?.[PREF_TIMES] ?? {};
+  const tb = b.data?.[PREF_TIMES] ?? {};
+  const data = { ...a.data, ...b.data };
+  const times = {};
+  for (const k of new Set([...Object.keys(a.data ?? {}), ...Object.keys(b.data ?? {})])) {
+    if (k === PREF_TIMES) continue;
+    const at = ta[k] ?? a.updatedAt;
+    const bt = tb[k] ?? b.updatedAt;
+    if (!(k in (b.data ?? {})) || (k in (a.data ?? {}) && at > bt)) {
+      data[k] = a.data[k];
+      times[k] = at;
+    } else {
+      data[k] = b.data[k];
+      times[k] = bt;
+    }
+  }
+  data[PREF_TIMES] = times;
+  return data;
+}
+
+const itemSize = (c) => {
+  try {
+    return Buffer.byteLength(JSON.stringify(c));
+  } catch {
+    return Infinity;
+  }
+};
 
 // ---------- Auth ----------
 
@@ -223,40 +266,86 @@ const routes = {
   'GET /me': async (req) => ({ user: publicUser((await authenticate(req)).user) }),
 
   /**
-   * Two-way sync. Body: { since: number, collections: string[], changes: [{collection, id, data, updatedAt, deleted}] }.
-   * Last write (by updatedAt) wins per item. Returns every item stored after `since`
-   * (a server sequence number, so device clocks don't matter) and the new cursor.
+   * Two-way sync. Body: { since: number, collections: string[], full?: string[],
+   *   changes: [{collection, id, data, updatedAt, deleted, patch?: {base, keep, messages}}] }.
+   * Last write (by updatedAt) wins per item; prefs merge key by key. Returns every item stored after
+   * `since` (a server sequence number, so device clocks don't matter), every live item of the `full`
+   * collections, the server's copy of every change it rejected, and the new cursor. Apps that send
+   * `collections` get `stored` acks ({collection, id, updatedAt}) for what this request stored instead
+   * of echoes, plus per-item `errors`.
    */
   'POST /sync': async (req, body) => {
     const { user } = await authenticate(req);
     const store = await loadUser(user.id);
     const changes = Array.isArray(body.changes) ? body.changes : [];
-    const known = Array.isArray(body.collections)
-      ? new Set(body.collections.filter((c) => COLLECTIONS.has(c)))
-      : LEGACY_COLLECTIONS;
-    let changed = false;
+    // Newer apps send the collections they can store; they get acks instead of echoes of what they sent.
+    const modern = Array.isArray(body.collections);
+    const known = modern ? new Set(body.collections.filter((c) => COLLECTIONS.has(c))) : LEGACY_COLLECTIONS;
+    let since = Number(body.since) || 0;
+    // A cursor from the future (e.g. the server's data was restored from a backup): send everything again.
+    const reset = since > store.seq;
+    if (reset) since = 0;
+    const full = new Set(Array.isArray(body.full) ? body.full.filter((c) => known.has(c)) : []);
+    const stored = new Map(); // key -> seq this request wrote
+    const rejected = new Set(); // keys whose server copy wins: always sent back
+    const errors = [];
     for (const c of changes) {
-      if (!known.has(c.collection) || typeof c.id !== 'string' || !c.id) continue;
+      if (!c || !known.has(c.collection) || typeof c.id !== 'string' || !c.id) continue;
       const key = `${c.collection}/${c.id}`;
+      if (itemSize(c) > MAX_ITEM) {
+        errors.push({ collection: c.collection, id: c.id, error: 'Too large to sync' });
+        continue;
+      }
       const existing = store.items[key];
-      const updatedAt = Number(c.updatedAt) || Date.now();
-      if (existing && existing.updatedAt > updatedAt) continue; // server copy is newer
-      store.items[key] = {
-        collection: c.collection,
-        id: c.id,
-        updatedAt,
-        deleted: !!c.deleted,
-        data: c.deleted ? null : c.data,
-        seq: ++store.seq,
-      };
-      changed = true;
+      let updatedAt = Number(c.updatedAt) || Date.now();
+      if (c.collection === 'prefs' && !c.deleted && existing && !existing.deleted) {
+        // Settings merge key by key, so changes to different settings on two devices are both kept.
+        const data = mergePrefsData(existing, { updatedAt, data: c.data });
+        const same = JSON.stringify(data) === JSON.stringify(existing.data);
+        if (same && updatedAt <= existing.updatedAt) {
+          rejected.add(key);
+          continue;
+        }
+        updatedAt = Math.max(updatedAt, existing.updatedAt + (same ? 0 : 1));
+        store.items[key] = { collection: c.collection, id: c.id, updatedAt, deleted: false, data, seq: ++store.seq };
+        stored.set(key, store.seq);
+        rejected.add(key); // the merged copy goes back to the client
+        continue;
+      }
+      if (existing && existing.updatedAt > updatedAt) {
+        rejected.add(key); // server copy is newer
+        continue;
+      }
+      // Don't delete what changed after the client last synced: it hasn't seen that change yet.
+      if (c.deleted && existing && !existing.deleted && existing.seq > since && !stored.has(key)) {
+        rejected.add(key);
+        continue;
+      }
+      let data = c.deleted ? null : c.data;
+      if (!c.deleted && c.patch) {
+        // Only the changed tail of a chat's messages, on top of the copy the client last saw.
+        const base = existing && !existing.deleted ? existing : null;
+        const keep = Number(c.patch.keep);
+        if (!base || base.updatedAt !== Number(c.patch.base) || !Array.isArray(base.data?.messages) || !(keep >= 0) || keep > base.data.messages.length || !Array.isArray(c.patch.messages)) {
+          errors.push({ collection: c.collection, id: c.id, error: 'Send the whole item', code: 'resend' });
+          continue;
+        }
+        data = { ...c.data, messages: base.data.messages.slice(0, keep).concat(c.patch.messages) };
+      }
+      store.items[key] = { collection: c.collection, id: c.id, updatedAt, deleted: !!c.deleted, data, seq: ++store.seq };
+      stored.set(key, store.seq);
     }
-    if (changed) await writeJson(userFile(user.id), store);
-    const since = Number(body.since) || 0;
-    const items = Object.values(store.items)
-      .filter((i) => i.seq > since && known.has(i.collection))
-      .map(({ seq, ...rest }) => rest);
-    return { cursor: store.seq, items };
+    if (stored.size) await writeJson(userFile(user.id), store);
+    const acks = [];
+    const items = [];
+    for (const [key, i] of Object.entries(store.items)) {
+      if (!known.has(i.collection)) continue;
+      const { seq, ...rest } = i;
+      if (modern && stored.get(key) === seq && !rejected.has(key)) acks.push({ collection: i.collection, id: i.id, updatedAt: i.updatedAt, ...(i.deleted ? { deleted: true } : {}) });
+      else if (seq > since || rejected.has(key) || (full.has(i.collection) && !i.deleted)) items.push(rest);
+    }
+    if (!modern) return { cursor: store.seq, items };
+    return { cursor: store.seq, items, stored: acks, errors, collections: [...known], patches: true, ...(reset ? { reset: true } : {}) };
   },
 };
 
@@ -811,10 +900,24 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST') {
       const chunks = [];
       let size = 0;
+      let tooLarge = Number(req.headers['content-length']) > MAX_BODY;
       for await (const c of req) {
         size += c.length;
-        if (size > MAX_BODY) throw httpError(413, 'Request too large');
+        if (size > MAX_BODY) tooLarge = true;
+        if (tooLarge) {
+          chunks.length = 0; // keep reading (and discarding) so the client gets the 413, not a reset
+          if (size > 4 * MAX_BODY) {
+            res.setHeader('Connection', 'close');
+            send(413, { error: 'Request too large' });
+            return req.destroy();
+          }
+          continue;
+        }
         chunks.push(c);
+      }
+      if (tooLarge) {
+        res.setHeader('Connection', 'close');
+        throw httpError(413, 'Request too large');
       }
       const raw = Buffer.concat(chunks).toString('utf8');
       body = raw ? JSON.parse(raw) : {};
@@ -828,7 +931,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-await fs.mkdir(DATA_DIR, { recursive: true });
+await fs.mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
+await fs.chmod(DATA_DIR, 0o700).catch(() => {});
 await sweepBlobs();
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`TryChat server listening on http://0.0.0.0:${PORT}`);
