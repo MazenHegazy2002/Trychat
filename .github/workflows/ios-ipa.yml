@@ -1,0 +1,54 @@
+name: iOS IPA (unsigned)
+
+# Builds an unsigned TryChat .ipa on a macOS runner. Install it on an iPhone/iPad by signing it with
+# your own Apple ID in a sideloading tool (e.g. Sideloadly or AltStore). A signed TestFlight/App Store
+# build needs an Apple Developer account (use EAS Build or add signing secrets to this workflow).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, ccr-3c4f8ca3-5fdilw]
+    paths-ignore: ['**.md', 'bridge/**', 'server/**']
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate the iOS project
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install pods
+        working-directory: ios
+        run: pod install
+
+      - name: Build (Release, no code signing)
+        working-directory: ios
+        run: |
+          WS=$(ls -d *.xcworkspace | head -1)
+          SCHEME=$(basename "$WS" .xcworkspace)
+          xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tail -n 50
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          mkdir -p Payload && cp -R "$APP" Payload/
+          zip -qry "../TryChat-${{ github.run_number }}-unsigned.ipa" Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TryChat-ipa-${{ github.run_number }}
+          path: TryChat-${{ github.run_number }}-unsigned.ipa
