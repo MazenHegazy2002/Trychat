@@ -162,12 +162,14 @@ export async function messageContent(
 
 /** Keeps a finished recording (m4a) as a voice-note attachment. */
 export async function voiceAttachment(uri: string, durationMs: number): Promise<Attachment> {
-  const file = await keep(uri, 'voice.m4a');
+  // Browsers (and the desktop app) record WebM/Opus; phones record AAC in .m4a.
+  const web = Platform.OS === 'web';
+  const file = await keep(uri, web ? 'voice.webm' : 'voice.m4a');
   return {
     id: uid(),
     kind: 'file',
-    name: 'Voice message.m4a',
-    mimeType: 'audio/mp4',
+    name: web ? 'Voice message.webm' : 'Voice message.m4a',
+    mimeType: web ? 'audio/webm' : 'audio/mp4',
     uri: file.uri,
     size: file.size ?? 0,
     origin: 'upload',
@@ -181,7 +183,7 @@ export async function transcribeVoice(settings: Settings, a: Attachment): Promis
   return transcribeWithFallback(
     { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.transcriptionModel },
     bytes,
-    'voice.m4a',
+    a.mimeType === 'audio/webm' ? 'voice.webm' : 'voice.m4a',
     a.mimeType,
     // The body is a fresh Uint8Array, so its buffer holds exactly the multipart bytes.
     (url, init) => fetch(url, { ...init, body: init.body.buffer as ArrayBuffer }),

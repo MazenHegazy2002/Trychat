@@ -12,6 +12,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 
 import { useTheme } from '../lib/theme';
 import type { Attachment } from '../lib/types';
+import { displayUri } from '../lib/webFiles';
 import { Icon } from './ui';
 
 export const MAX_VOICE_MS = 5 * 60 * 1000;
@@ -135,7 +136,7 @@ export function VoiceRecorder({
 /** Play/pause, progress bar and time for a voice note. */
 export function VoicePlayer({ uri, durationMs }: { uri: string; durationMs: number }) {
   const theme = useTheme();
-  const player = useAudioPlayer({ uri }, { updateInterval: 200 });
+  const player = useAudioPlayer({ uri: displayUri(uri) }, { updateInterval: 200 });
   const status = useAudioPlayerStatus(player);
   const total = status.duration > 0 ? status.duration * 1000 : durationMs;
   const pos = status.currentTime * 1000;

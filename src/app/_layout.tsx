@@ -1,26 +1,20 @@
-import * as Notifications from 'expo-notifications';
-import { router, Stack } from 'expo-router';
-import { useEffect } from 'react';
+import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Platform, View } from 'react-native';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 
+import { AlertHost } from '../components/AlertHost';
 import { CodeRunnerHost } from '../components/CodeRunnerHost';
+import { useNotificationNavigation } from '../lib/notificationNav';
 import { StoreProvider, useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
+import { filesReady } from '../lib/webFiles';
 
 function Navigator() {
   const theme = useTheme();
   const { ready } = useStore();
-  const response = Notifications.useLastNotificationResponse();
-
-  // Tapping a "TryChat replied" notification opens that chat.
-  useEffect(() => {
-    const url = response?.notification.request.content.data?.url;
-    if (!ready || typeof url !== 'string') return;
-    router.push(url as never);
-    Notifications.clearLastNotificationResponse();
-  }, [ready, response]);
+  useNotificationNavigation(ready);
 
   if (!ready) {
     return (
@@ -61,12 +55,18 @@ function Navigator() {
 }
 
 export default function RootLayout() {
+  const [filesLoaded, setFilesLoaded] = useState(Platform.OS !== 'web');
+  useEffect(() => {
+    filesReady.finally(() => setFilesLoaded(true));
+  }, []);
+  if (!filesLoaded) return null;
   return (
     <KeyboardProvider>
       <StoreProvider>
         <StatusBar style="auto" />
         <Navigator />
         <CodeRunnerHost />
+        <AlertHost />
       </StoreProvider>
     </KeyboardProvider>
   );

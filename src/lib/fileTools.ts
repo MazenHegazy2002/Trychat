@@ -14,6 +14,7 @@ import {
   sanitizeFileName,
   typeLabel,
 } from './fileKinds';
+import { desktop } from './desktop';
 import { uid } from './id';
 import { listLibrary } from './library';
 import type { LibraryFile } from './library';
@@ -141,6 +142,15 @@ async function makePdf(name: string, input: { html?: string; markdown?: string; 
   const html = printableHtml({ ...input, title: safe.replace(/\.pdf$/i, '') });
   const size = PAGE_SIZES[input.pageSize === 'a4' ? 'a4' : 'letter'];
   const margin = 50;
+  if (Platform.OS === 'web') {
+    // No expo-print PDFs on web; the desktop app prints with Chromium instead.
+    if (!desktop) throw new Error('Making PDFs needs the TryChat app (phone or Mac). Offer the document as HTML or Markdown instead.');
+    const bytes = await desktop.htmlToPdf(html, { width: size.width / 72, height: size.height / 72, margin: margin / 72 });
+    assertSize(bytes.length, 'The PDF');
+    const { id, file } = newFileTarget(safe);
+    file.write(bytes);
+    return attachment(id, file, safe, 'application/pdf', file.size ?? bytes.length);
+  }
   const result = await Print.printToFileAsync({
     html,
     ...size,

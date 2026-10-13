@@ -3,6 +3,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
 
+import { desktop, downloadBytes } from './desktop';
 import { readFileText } from './fileTools';
 import type { Attachment } from './types';
 
@@ -23,6 +24,11 @@ function ensureOnDevice(a: Attachment) {
 /** The system share sheet (AirDrop, messages, mail, Drive, “Save to Files” on iOS…). */
 export async function shareFile(a: Attachment, dialogTitle = `Share ${a.name}`): Promise<void> {
   ensureOnDevice(a);
+  if (Platform.OS === 'web') {
+    // Web / desktop: no share sheet; save a copy instead.
+    await saveToDevice(a);
+    return;
+  }
   if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing isn’t available on this device.');
   await Sharing.shareAsync(a.uri, { mimeType: a.mimeType, dialogTitle });
 }
@@ -32,7 +38,11 @@ export async function shareFile(a: Attachment, dialogTitle = `Share ${a.name}`):
  * (a plain file:// link can't be opened by other apps), so the chooser lists PDF readers, Docs, Sheets…
  * iOS shows the share sheet, whose app row opens it in Files, Books, Numbers and so on.
  */
-export function openWithApp(a: Attachment): Promise<void> {
+export async function openWithApp(a: Attachment): Promise<void> {
+  if (Platform.OS === 'web' && desktop) {
+    ensureOnDevice(a);
+    return desktop.openFile(a.name, await new File(a.uri).bytes());
+  }
   return shareFile(a, `Open ${a.name} with`);
 }
 
@@ -45,6 +55,15 @@ let lastDirectory: string | undefined;
  */
 export async function saveToDevice(a: Attachment): Promise<string | null> {
   ensureOnDevice(a);
+  if (Platform.OS === 'web') {
+    const bytes = await new File(a.uri).bytes();
+    if (desktop) {
+      const path = await desktop.saveFile(a.name, bytes);
+      return path ? `Saved ${a.name} to ${path}.` : null;
+    }
+    downloadBytes(a.name, bytes, a.mimeType);
+    return `Downloaded ${a.name}.`;
+  }
   if (Platform.OS !== 'android') {
     await shareFile(a, `Save ${a.name}`);
     return null;

@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatSize } from '../lib/attachments';
 import { useTheme } from '../lib/theme';
 import type { Attachment } from '../lib/types';
+import { displayUri } from '../lib/webFiles';
 import { Icon } from './ui';
 import type { IconName } from './ui';
 import { VoiceNote } from './Voice';
@@ -69,7 +70,7 @@ export function PendingAttachments({ items, onRemove }: { items: Attachment[]; o
       {items.map((a) => (
         <View key={a.id}>
           {a.kind === 'image' ? (
-            <Image source={{ uri: a.uri }} style={[styles.thumb, { backgroundColor: theme.surface2 }]} />
+            <Image source={{ uri: displayUri(a.uri) }} style={[styles.thumb, { backgroundColor: theme.surface2 }]} />
           ) : (
             <FileTile a={a} />
           )}
@@ -114,7 +115,7 @@ export function MessageAttachments({ items }: { items: Attachment[] }) {
           {images.map((a) => (
             <Pressable key={a.id} onPress={() => setOpen(a)} accessibilityLabel={`Open ${a.name}`}>
               <Image
-                source={{ uri: a.uri }}
+                source={{ uri: displayUri(a.uri) }}
                 style={[images.length === 1 ? styles.single : styles.multi, { backgroundColor: theme.surface2 }]}
               />
             </Pressable>
@@ -129,7 +130,7 @@ export function MessageAttachments({ items }: { items: Attachment[] }) {
       ))}
       <Modal visible={!!open} transparent animationType="fade" onRequestClose={() => setOpen(null)}>
         <Pressable style={styles.viewer} onPress={() => setOpen(null)} accessibilityLabel="Close image">
-          {open && <Image source={{ uri: open.uri }} style={{ width: '100%', height: '80%' }} resizeMode="contain" />}
+          {open && <Image source={{ uri: displayUri(open.uri) }} style={{ width: '100%', height: '80%' }} resizeMode="contain" />}
         </Pressable>
       </Modal>
     </View>

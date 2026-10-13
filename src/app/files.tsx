@@ -13,6 +13,7 @@ import type { LibraryFile } from '../lib/library';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { Attachment } from '../lib/types';
+import { displayUri } from '../lib/webFiles';
 
 type Filter = 'all' | 'images' | 'documents' | 'friends';
 const FILTERS: [Filter, string][] = [
@@ -153,7 +154,7 @@ export default function FilesScreen() {
             accessibilityHint="Opens the file. Long-press for more options."
           >
             {item.kind === 'image' ? (
-              <Image source={{ uri: item.uri }} style={[styles.thumb, { backgroundColor: theme.surface2 }]} />
+              <Image source={{ uri: displayUri(item.uri) }} style={[styles.thumb, { backgroundColor: theme.surface2 }]} />
             ) : (
               <View style={[styles.thumb, styles.tile, { backgroundColor: theme.surface2 }]}>
                 <Icon name={fileIcon(item)} size={20} color={theme.text} />

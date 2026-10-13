@@ -1,0 +1,51 @@
+name: Mac DMG
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, ccr-3c4f8ca3-5fdilw]
+    paths:
+      - 'src/**'
+      - 'desktop/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'metro.config.js'
+      - 'app.json'
+      - '.github/workflows/mac-dmg.yml'
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Export the web build
+        run: npx expo export --platform web --output-dir desktop/web
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build unsigned universal DMG
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --mac dmg --universal --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TryChat-mac-dmg
+          path: desktop/dist/*.dmg
+          if-no-files-found: error

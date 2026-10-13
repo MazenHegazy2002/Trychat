@@ -1,0 +1,63 @@
+{
+  "name": "trychat-desktop",
+  "productName": "TryChat",
+  "version": "1.0.0",
+  "description": "TryChat for Mac",
+  "main": "main.js",
+  "private": true,
+  "author": "TryChat",
+  "scripts": {
+    "web": "cd .. && npx expo export --platform web --output-dir desktop/web",
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac --universal",
+    "dist:linux-dir": "electron-builder --linux dir"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.trychat.desktop",
+    "productName": "TryChat",
+    "copyright": "TryChat",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer-shim.js",
+      "web/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "notarize": false,
+      "target": [
+        "dmg"
+      ],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "TryChat uses the microphone so you can send voice messages.",
+        "NSCameraUsageDescription": "TryChat uses the camera so you can send photos in chats.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
+    "dmg": {
+      "title": "TryChat",
+      "artifactName": "TryChat-${version}-${arch}.dmg"
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "icon": "build/icon.png"
+    }
+  }
+}

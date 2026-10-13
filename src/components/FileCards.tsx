@@ -10,6 +10,8 @@ import type { FileGroup } from '../lib/fileKinds';
 import { readFileText } from '../lib/fileTools';
 import { useTheme } from '../lib/theme';
 import type { Attachment } from '../lib/types';
+import { displayUri } from '../lib/webFiles';
+import { HtmlView } from './HtmlView';
 import { ShareToFriendSheet } from './ShareToFriendSheet';
 import { Icon } from './ui';
 import type { IconName } from './ui';
@@ -126,7 +128,7 @@ export function FileCards({ files }: { files: Attachment[]; conversationId?: str
             >
               {fileOnDevice(a) ? (
                 <Image
-                  source={{ uri: a.uri }}
+                  source={{ uri: displayUri(a.uri) }}
                   style={[images.length === 1 ? styles.single : styles.multi, { backgroundColor: theme.surface2 }]}
                   resizeMode="cover"
                 />
@@ -328,23 +330,20 @@ export function FileViewer({ file, onClose, onMore }: { file: Attachment | null;
               centerContent
               showsVerticalScrollIndicator={false}
             >
-              <Image source={{ uri: file.uri }} style={{ flex: 1, width: '100%', minHeight: 300 }} resizeMode="contain" accessibilityLabel={file.name} />
+              <Image source={{ uri: displayUri(file.uri) }} style={{ flex: 1, width: '100%', minHeight: 300 }} resizeMode="contain" accessibilityLabel={file.name} />
             </ScrollView>
           ) : loading ? (
             <ActivityIndicator color={theme.muted} style={{ marginTop: 40 }} />
           ) : isHtml && text !== null ? (
-            <WebView
-              originWhitelist={['*']}
-              source={{ html: text, baseUrl: 'https://localhost/' }}
-              style={{ backgroundColor: '#FFFFFF' }}
-              setSupportMultipleWindows={false}
-            />
+            <HtmlView html={text} />
           ) : isText && text !== null ? (
             <ScrollView contentContainerStyle={{ padding: 16 }}>
               <Text selectable style={{ color: theme.text, fontFamily: 'monospace', fontSize: 13, lineHeight: 19 }}>
                 {text}
               </Text>
             </ScrollView>
+          ) : Platform.OS === 'web' && fileGroup(file.name, file.mimeType) === 'pdf' ? (
+            <HtmlView uri={file.uri} background={theme.bg} />
           ) : Platform.OS === 'ios' && canViewInApp(file) ? (
             <WebView
               originWhitelist={['*']}

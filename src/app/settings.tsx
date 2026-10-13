@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { ModelPicker } from '../components/ModelPicker';
@@ -237,6 +237,7 @@ export default function SettingsScreen() {
         </View>
       ))}
 
+      {Platform.OS !== 'web' && (
       <View style={[styles.switchRow, { borderBottomColor: theme.border }]}>
         <View style={{ flex: 1, paddingRight: 12 }}>
           <Text style={{ color: theme.text, fontSize: 16 }}>Keep working in the background</Text>
@@ -246,6 +247,7 @@ export default function SettingsScreen() {
         </View>
         <Switch value={background} onValueChange={setBackgroundEnabled} />
       </View>
+      )}
 
       <Text style={[styles.section, { color: theme.text }]}>Data</Text>
       <Pressable
