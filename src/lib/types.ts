@@ -238,8 +238,20 @@ export interface Settings {
   codeExecution: boolean;
   /** Plugin marketplaces the user added to the Store ("owner/repo"). */
   marketplaces: string[];
+  /** The folder on this phone the user shared with TryChat (phone.* tools). Device-only, never synced. */
+  phoneFolder: PhoneFolder | null;
   /** When synced preferences last changed (drives last-write-wins across devices). */
   prefsUpdatedAt?: number;
+}
+
+/** A folder on this phone the user granted TryChat access to. */
+export interface PhoneFolder {
+  /** content:// tree URI (Android, Storage Access Framework) or file:// URL (iOS). */
+  uri: string;
+  /** Shown in Connections and to the model. */
+  name: string;
+  /** 'picked': chosen in the system folder picker. 'app': TryChat's own folder (iOS Files → On My iPhone → TryChat). */
+  source: 'picked' | 'app';
 }
 
 /** Something the model found with store.search and the user approved installing (store.install). */

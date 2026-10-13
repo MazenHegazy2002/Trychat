@@ -69,6 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
   subAgents: true,
   codeExecution: true,
   marketplaces: [],
+  phoneFolder: null,
 };
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {

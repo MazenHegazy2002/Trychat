@@ -1,6 +1,7 @@
 import { callMcpTool, mcpToolName } from './mcp';
 import { normalizeLanguage, runCode } from './runner';
 import { fileTools } from './fileTools';
+import { GITHUB_TOOLS } from './github';
 import { phoneTools } from './phoneTools';
 import type { AgentProfile } from './plugins';
 import { socialTools } from './socialTools';
@@ -60,43 +61,9 @@ export type Args = Record<string, any>;
 const MAX_RESULT_CHARS = 12000;
 
 // ---------- GitHub ----------
+// The client and the github.* tools live in ./github.
 
-async function gh(settings: Settings, path: string, init: { method?: string; body?: unknown } = {}) {
-  const res = await fetch(`https://api.github.com${path}`, {
-    method: init.method ?? 'GET',
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${settings.githubToken}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  });
-  const text = await res.text();
-  const json = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new Error(`GitHub ${res.status}: ${json?.message ?? text}`);
-  return json;
-}
-
-const encodePath = (p: string) => p.split('/').filter(Boolean).map(encodeURIComponent).join('/');
-
-function utf8ToBase64(s: string): string {
-  const bytes = new TextEncoder().encode(s);
-  let bin = '';
-  bytes.forEach((b) => (bin += String.fromCharCode(b)));
-  return btoa(bin);
-}
-
-function base64ToUtf8(b64: string): string {
-  const bin = atob(b64.replace(/\s/g, ''));
-  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
-export async function githubWhoAmI(settings: Settings): Promise<string> {
-  const user = await gh(settings, '/user');
-  return user.login;
-}
+export { githubWhoAmI } from './github';
 
 // ---------- Laptop bridge ----------
 
@@ -141,85 +108,7 @@ export async function laptopInfo(settings: Settings): Promise<{ hostname: string
 // ---------- Tool table ----------
 
 const STATIC_TOOLS: Record<string, Omit<ToolDef, 'run'> & { run: (s: Settings, args: Args) => Promise<unknown> }> = {
-  'github.list_repos': {
-    service: 'github',
-    kind: 'read',
-    description: "List the user's repositories (most recently updated first).",
-    params: '{}',
-    label: () => 'Listed your GitHub repositories',
-    run: async (s) => {
-      const repos = await gh(s, '/user/repos?per_page=50&sort=updated');
-      return repos.map((r: any) => `${r.full_name}${r.private ? ' (private)' : ''} — ${r.description ?? ''}`).join('\n');
-    },
-  },
-  'github.list_files': {
-    service: 'github',
-    kind: 'read',
-    description: 'List files in a folder of a repository.',
-    params: '{"repo":"owner/name","path":"optional/folder","ref":"optional branch"}',
-    label: (a) => `Listed ${a.path || '/'} in ${a.repo}`,
-    run: async (s, a) => {
-      const q = a.ref ? `?ref=${encodeURIComponent(a.ref)}` : '';
-      const items = await gh(s, `/repos/${a.repo}/contents/${encodePath(a.path ?? '')}${q}`);
-      return Array.isArray(items) ? items.map((i: any) => (i.type === 'dir' ? i.path + '/' : i.path)).join('\n') : items.path;
-    },
-  },
-  'github.read_file': {
-    service: 'github',
-    kind: 'read',
-    description: 'Read a file from a repository.',
-    params: '{"repo":"owner/name","path":"file/path","ref":"optional branch"}',
-    label: (a) => `Read ${a.path} on GitHub`,
-    run: async (s, a) => {
-      const q = a.ref ? `?ref=${encodeURIComponent(a.ref)}` : '';
-      const file = await gh(s, `/repos/${a.repo}/contents/${encodePath(a.path)}${q}`);
-      if (Array.isArray(file)) throw new Error(`${a.path} is a folder; use github.list_files`);
-      return base64ToUtf8(file.content ?? '');
-    },
-  },
-  'github.write_file': {
-    service: 'github',
-    kind: 'write',
-    description: 'Create or update a file in a repository (commits directly to the branch).',
-    params: '{"repo":"owner/name","path":"file/path","content":"full new file content","message":"commit message","branch":"optional"}',
-    label: (a) => `Commit ${a.path} to ${a.repo}${a.branch ? `@${a.branch}` : ''}`,
-    run: async (s, a) => {
-      const url = `/repos/${a.repo}/contents/${encodePath(a.path)}`;
-      let sha: string | undefined;
-      try {
-        sha = (await gh(s, url + (a.branch ? `?ref=${encodeURIComponent(a.branch)}` : ''))).sha;
-      } catch {
-        sha = undefined; // new file
-      }
-      const res = await gh(s, url, {
-        method: 'PUT',
-        body: { message: a.message || `Update ${a.path}`, content: utf8ToBase64(a.content ?? ''), sha, branch: a.branch },
-      });
-      return `Committed ${res.commit?.sha?.slice(0, 7)}: ${res.commit?.html_url}`;
-    },
-  },
-  'github.list_issues': {
-    service: 'github',
-    kind: 'read',
-    description: 'List issues of a repository.',
-    params: '{"repo":"owner/name","state":"open|closed|all"}',
-    label: (a) => `Listed issues in ${a.repo}`,
-    run: async (s, a) => {
-      const issues = await gh(s, `/repos/${a.repo}/issues?state=${a.state ?? 'open'}&per_page=30`);
-      return issues.map((i: any) => `#${i.number} ${i.title}${i.pull_request ? ' (PR)' : ''}`).join('\n') || 'No issues.';
-    },
-  },
-  'github.create_issue': {
-    service: 'github',
-    kind: 'write',
-    description: 'Open a new issue.',
-    params: '{"repo":"owner/name","title":"...","body":"..."}',
-    label: (a) => `Open issue “${a.title}” in ${a.repo}`,
-    run: async (s, a) => {
-      const issue = await gh(s, `/repos/${a.repo}/issues`, { method: 'POST', body: { title: a.title, body: a.body } });
-      return `Opened #${issue.number}: ${issue.html_url}`;
-    },
-  },
+  ...GITHUB_TOOLS,
   'laptop.list_files': {
     service: 'laptop',
     kind: 'read',
@@ -440,7 +329,11 @@ ${tools.map(([name, t]) => `- ${name} ${t.params} — ${t.description}`).join('\
     );
   }
   if (ctx.settings.repos.length && githubConnected(ctx.settings)) {
-    parts.push(`The user's main GitHub repositories: ${ctx.settings.repos.join(', ')}. Prefer these when they ask about "my repo".`);
+    parts.push(
+      `The user's connected GitHub repositories (pinned in Connections): ${ctx.settings.repos.join(', ')}. Use these when they say "my repo" or "the repo"${
+        ctx.settings.repos.length === 1 ? '; github.* tools use it when "repo" is left out' : ''
+      }.`,
+    );
   }
   return parts.length ? parts.join('\n\n') : null;
 }
