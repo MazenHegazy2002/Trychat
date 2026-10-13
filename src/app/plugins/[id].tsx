@@ -1,6 +1,7 @@
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams, useNavigation } from 'expo-router';
+import { usePreventRemove } from 'expo-router/react-navigation';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
@@ -35,14 +36,42 @@ function hostOf(url: string): string {
 
 /** The value a settings field shows: saved value, else its default. Numbers are edited as text. */
 function fieldValue(plugin: Plugin, f: PluginConfigField): string | boolean {
-  if (f.sensitive) return plugin.secrets?.[f.key] ?? '';
-  const v = plugin.config[f.key] ?? f.default;
+  const v = f.sensitive ? plugin.secrets?.[f.key] : plugin.config[f.key] ?? f.default;
   if (f.type === 'boolean') return v === true || v === 'true';
   if (v === undefined || v === null) return '';
   return Array.isArray(v) ? v.join(',') : String(v);
 }
 
 const savedDraft = (plugin: Plugin): Draft => Object.fromEntries(plugin.userConfig.map((f) => [f.key, fieldValue(plugin, f)]));
+
+/** Switches and choices save as soon as they change, like the Enabled switch; typed values wait for Save. */
+const savesInstantly = (f: PluginConfigField) => f.type === 'boolean' || (!!f.options?.length && !f.sensitive);
+
+/** `plugin` with `values` saved into its settings. A value that didn't change keeps following its default. */
+function withValues(plugin: Plugin, values: Draft): Plugin {
+  const saved = savedDraft(plugin);
+  const config = { ...plugin.config };
+  const secrets = { ...(plugin.secrets ?? {}) };
+  for (const f of plugin.userConfig) {
+    if (!(f.key in values) || values[f.key] === saved[f.key]) continue;
+    const v = values[f.key];
+    if (f.type === 'boolean' && !f.sensitive) {
+      config[f.key] = v === true;
+      continue;
+    }
+    const s = String(v ?? '').trim();
+    if (f.sensitive) {
+      if (s) secrets[f.key] = s;
+      else delete secrets[f.key];
+    } else if (f.type === 'number') {
+      if (s) config[f.key] = Number(s);
+      else delete config[f.key]; // back to the default
+    } else {
+      config[f.key] = s;
+    }
+  }
+  return { ...plugin, config, secrets };
+}
 
 function fieldError(f: PluginConfigField, value: string | boolean): string | undefined {
   if (f.type !== 'number' || typeof value !== 'string' || !value.trim()) return undefined;
@@ -81,54 +110,64 @@ export default function PluginScreen() {
 
 function PluginDetail({ plugin }: { plugin: Plugin }) {
   const theme = useTheme();
+  const navigation = useNavigation();
   const { updatePlugin, uninstallPlugin, pluginServers, mcpTools, mcpErrors } = useStore();
+  /** Typed values not saved yet. Switches and choices aren't drafted: they show and save the plugin's values. */
   const [draft, setDraft] = useState<Draft>(() => savedDraft(plugin));
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [justSaved, setJustSaved] = useState(false);
+  const uninstalling = useRef(false);
 
   const name = plugin.displayName ?? plugin.name;
   const missing = missingConfig(plugin);
   const saved = savedDraft(plugin);
-  const dirty = plugin.userConfig.some((f) => draft[f.key] !== saved[f.key]);
+  const typed = plugin.userConfig.filter((f) => !savesInstantly(f));
+  const valueOf = (f: PluginConfigField) => (savesInstantly(f) ? saved[f.key] : draft[f.key]);
+  const dirty = typed.some((f) => draft[f.key] !== saved[f.key]);
   const errors = Object.fromEntries(
-    plugin.userConfig.map((f) => [f.key, fieldError(f, draft[f.key])] as const).filter(([, e]) => !!e),
+    plugin.userConfig.map((f) => [f.key, fieldError(f, valueOf(f))] as const).filter(([, e]) => !!e),
   ) as Record<string, string>;
   const hasErrors = Object.keys(errors).length > 0;
   const input = [styles.input, { backgroundColor: theme.bg, color: theme.text, borderColor: theme.border }];
 
-  const setField = (key: string, value: string | boolean) => {
-    setDraft((d) => ({ ...d, [key]: value }));
+  const setField = (f: PluginConfigField, value: string | boolean) => {
+    if (savesInstantly(f)) {
+      updatePlugin(withValues(plugin, { [f.key]: value }));
+      return;
+    }
+    setDraft((d) => ({ ...d, [f.key]: value }));
     setJustSaved(false);
   };
 
   const save = () => {
     if (!dirty || hasErrors) return;
-    const config = { ...plugin.config };
-    const secrets = { ...(plugin.secrets ?? {}) };
-    for (const f of plugin.userConfig) {
-      if (draft[f.key] === saved[f.key]) continue; // unchanged: an unset field keeps following its default
-      const v = draft[f.key];
-      if (f.type === 'boolean' && !f.sensitive) {
-        config[f.key] = v === true;
-        continue;
-      }
-      const s = String(v ?? '').trim();
-      if (f.sensitive) {
-        if (s) secrets[f.key] = s;
-        else delete secrets[f.key];
-      } else if (f.type === 'number') {
-        if (s) config[f.key] = Number(s);
-        else delete config[f.key]; // back to the default
-      } else {
-        config[f.key] = s;
-      }
-    }
-    const next = { ...plugin, config, secrets };
+    const next = withValues(plugin, Object.fromEntries(typed.map((f) => [f.key, draft[f.key]])));
     updatePlugin(next);
     // Show the values as saved (trimmed, numbers normalised, cleared numbers back to their default).
     setDraft(savedDraft(next));
     setJustSaved(true);
   };
+
+  // Leaving with typed values not saved (Back, swipe, Android back): ask instead of silently dropping them.
+  usePreventRemove(dirty, ({ data }) => {
+    if (uninstalling.current) return navigation.dispatch(data.action);
+    const leave = () => navigation.dispatch(data.action);
+    Alert.alert('Save your changes?', `Some settings for ${name} aren’t saved yet.`, [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: leave },
+      ...(hasErrors
+        ? []
+        : [
+            {
+              text: 'Save',
+              onPress: () => {
+                save();
+                leave();
+              },
+            },
+          ]),
+    ]);
+  });
 
   const confirmUninstall = () =>
     Alert.alert(`Uninstall ${name}?`, 'Its skills, commands, agents and MCP servers are removed from TryChat, along with its settings.', [
@@ -137,6 +176,7 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
         text: 'Uninstall',
         style: 'destructive',
         onPress: () => {
+          uninstalling.current = true; // its unsaved settings go with it: no "save your changes?" on the way out
           uninstallPlugin(plugin.id);
           router.back();
         },
@@ -146,7 +186,7 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
   const open = (url: string) => Linking.openURL(url).catch(() => Alert.alert('Couldn’t open link', url));
 
   const renderField = (f: PluginConfigField) => {
-    const value = draft[f.key];
+    const value = valueOf(f);
     const label = (
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>{f.title || f.key}</Text>
@@ -165,7 +205,7 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
             {label}
             {description}
           </View>
-          <ClaySwitch value={value === true} onValueChange={(v) => setField(f.key, v)} label={f.title || f.key} />
+          <ClaySwitch value={value === true} onValueChange={(v) => setField(f, v)} label={f.title || f.key} />
         </View>
       );
     }
@@ -181,9 +221,9 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
             const choose = () => {
               if (f.multiple) {
                 const next = on ? picked.filter((p) => p !== opt) : [...picked, opt];
-                setField(f.key, next.join(','));
+                setField(f, next.join(','));
               } else {
-                setField(f.key, on && !f.required ? '' : opt);
+                setField(f, on && !f.required ? '' : opt);
               }
             };
             return (
@@ -211,7 +251,7 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 }}>
           <TextInput
             value={text}
-            onChangeText={(v) => setField(f.key, v)}
+            onChangeText={(v) => setField(f, v)}
             placeholder={
               f.type === 'number'
                 ? rangeHint(f) ?? 'Number'
@@ -354,15 +394,20 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
               <Text style={{ color: theme.faint, fontSize: 12, flex: 1 }}>Sensitive values stay on this device.</Text>
             </View>
           )}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 }}>
-            <PillButton title="Save settings" onPress={save} disabled={!dirty || hasErrors} />
-            {justSaved && !dirty && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Icon name="check" size={15} color={theme.accent} />
-                <Text style={{ color: theme.muted, fontSize: 13 }}>Saved</Text>
-              </View>
-            )}
-          </View>
+          {typed.length > 0 && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 }}>
+              <PillButton title="Save settings" onPress={save} disabled={!dirty || hasErrors} />
+              {justSaved && !dirty && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Icon name="check" size={15} color={theme.accent} />
+                  <Text style={{ color: theme.muted, fontSize: 13 }}>Saved</Text>
+                </View>
+              )}
+            </View>
+          )}
+          {typed.length > 0 && typed.length < plugin.userConfig.length && (
+            <Text style={{ color: theme.faint, fontSize: 12, marginTop: 8 }}>Switches and choices are saved as soon as you change them.</Text>
+          )}
         </>
       )}
 

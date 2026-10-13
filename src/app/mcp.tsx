@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View 
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel, TextAction } from '../components/ui';
+import { placeholders } from '../lib/catalog';
 import { uid } from '../lib/id';
 import { mcpTransport } from '../lib/mcp';
 import { useStore } from '../lib/store';
@@ -15,14 +16,109 @@ const hostOf = (url: string) => url.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?
 
 const blank = (): McpServer => ({ id: uid(), name: '', url: '', token: '', enabled: true, confirm: true, updatedAt: Date.now() });
 
+/** A header being edited; `id` keeps the row (and its keyboard focus) stable while its name changes. */
+interface HeaderRow {
+  id: string;
+  name: string;
+  value: string;
+}
+
+/** Characters an HTTP header name may use (RFC 9110 token). */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/** What's wrong with the headers being edited, or '' when they can be saved. */
+function headersProblem(rows: HeaderRow[]): string {
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const name = r.name.trim();
+    if (!name) {
+      if (r.value.trim()) return 'Give every header a name.';
+      continue;
+    }
+    if (!HEADER_NAME.test(name)) return `“${name}” isn’t a valid header name (letters, digits and dashes, no spaces).`;
+    if (/[\r\n]/.test(r.value)) return `The value of ${name} can’t contain line breaks.`;
+    if (seen.has(name.toLowerCase())) return `${name} is listed twice.`;
+    seen.add(name.toLowerCase());
+  }
+  return '';
+}
+
 export default function McpScreen() {
   const theme = useTheme();
   const { mcpServers, pluginServers, plugins, mcpTools, mcpErrors, saveMcpServer, deleteMcpServer, refreshMcpTools } = useStore();
   const [draft, setDraft] = useState<McpServer | null>(null);
+  /** The draft's headers and URL keys (decoded). Like the token, they stay on this device: sync strips them. */
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>([]);
+  const [urlKeys, setUrlKeys] = useState<Record<string, string>>({});
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [refreshing, setRefreshing] = useState<string | null>(null);
 
   const input = [styles.input, { backgroundColor: theme.bg, color: theme.text, borderColor: theme.border }];
-  const canSave = !!draft && !!draft.name.trim() && /^https?:\/\/\S+$/.test(draft.url);
+  /** {name} placeholders in the URL, filled from device-only values when connecting (e.g. an API key). */
+  const urlKeyNames = draft ? placeholders(draft.url) : [];
+  const headerError = headersProblem(headerRows);
+  const canSave = !!draft && !!draft.name.trim() && /^https?:\/\/\S+$/.test(draft.url) && !headerError;
+
+  const edit = (server: McpServer | null) => {
+    setDraft(server);
+    setHeaderRows(Object.entries(server?.headers ?? {}).map(([name, value]) => ({ id: uid(), name, value })));
+    // Stored percent-encoded, ready for the URL; edited as typed.
+    setUrlKeys(Object.fromEntries(Object.entries(server?.urlSecrets ?? {}).map(([k, v]) => [k, safeDecode(v)])));
+    setRevealed({});
+  };
+
+  const setHeader = (id: string, patch: Partial<HeaderRow>) => setHeaderRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  const save = () => {
+    if (!draft || !canSave) return;
+    const headers = Object.fromEntries(
+      headerRows.filter((r) => r.name.trim() && r.value.trim()).map((r) => [r.name.trim(), r.value.trim()]),
+    );
+    const urlSecrets = Object.fromEntries(urlKeyNames.map((k) => [k, encodeURIComponent((urlKeys[k] ?? '').trim())]));
+    saveMcpServer({
+      ...draft,
+      name: draft.name.trim(),
+      headers: Object.keys(headers).length ? headers : undefined,
+      urlSecrets: urlKeyNames.length ? urlSecrets : undefined,
+    });
+    edit(null);
+  };
+
+  /** A masked input for a key, with a button to show it. */
+  const secretInput = (id: string, label: string, value: string, onChange: (v: string) => void, placeholder = '') => {
+    const shown = !!revealed[id];
+    return (
+      <View style={styles.secretRow}>
+        <TextInput
+          value={value}
+          onChangeText={onChange}
+          placeholder={placeholder}
+          placeholderTextColor={theme.faint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry={!shown}
+          accessibilityLabel={label}
+          style={[input, { flex: 1 }]}
+        />
+        <Pressable
+          onPress={() => setRevealed((r) => ({ ...r, [id]: !shown }))}
+          style={styles.iconBtn}
+          accessibilityRole="button"
+          accessibilityLabel={shown ? `Hide ${label}` : `Show ${label}`}
+        >
+          <Icon name={shown ? 'eye-off' : 'eye'} size={18} />
+        </Pressable>
+      </View>
+    );
+  };
 
   const refresh = async (id: string) => {
     setRefreshing(id);
@@ -104,7 +200,7 @@ export default function McpScreen() {
                 ) : (
                   <TextAction title="Reconnect" onPress={() => refresh(server.id)} />
                 )}
-                <TextAction title={error ? 'Edit token' : 'Edit'} tone="ink" onPress={() => setDraft(server)} />
+                <TextAction title={error ? 'Edit keys' : 'Edit'} tone="ink" onPress={() => edit(server)} />
                 <TextAction title="Remove" tone="danger" onPress={() => remove(server)} />
               </View>
             </Card>
@@ -152,22 +248,58 @@ export default function McpScreen() {
             secureTextEntry
             style={input}
           />
-          <Text style={{ color: theme.faint, fontSize: 12, marginTop: 6 }}>Tokens stay on this device; the server list syncs.</Text>
+
+          {urlKeyNames.map((key) => (
+            <View key={key}>
+              <Text style={[styles.label, { color: theme.muted }]}>{key} (in the URL)</Text>
+              {secretInput(`url:${key}`, key, urlKeys[key] ?? '', (v) => setUrlKeys((k) => ({ ...k, [key]: v })))}
+            </View>
+          ))}
+
+          <Text style={[styles.label, { color: theme.muted }]}>Headers (optional)</Text>
+          {headerRows.map((row) => (
+            <View key={row.id} style={[styles.headerBox, { borderColor: theme.border }]}>
+              <View style={styles.secretRow}>
+                <TextInput
+                  value={row.name}
+                  onChangeText={(name) => setHeader(row.id, { name })}
+                  placeholder="Name, e.g. X-API-Key"
+                  placeholderTextColor={theme.faint}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  accessibilityLabel="Header name"
+                  style={[input, { flex: 1, fontFamily: 'monospace', fontSize: 14 }]}
+                />
+                <Pressable
+                  onPress={() => setHeaderRows((rows) => rows.filter((r) => r.id !== row.id))}
+                  style={styles.iconBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove header ${row.name.trim()}`}
+                >
+                  <Icon name="x" size={18} />
+                </Pressable>
+              </View>
+              {secretInput(`header:${row.id}`, `${row.name.trim() || 'Header'} value`, row.value, (value) => setHeader(row.id, { value }), 'Value')}
+            </View>
+          ))}
+          <View style={{ alignSelf: 'flex-start' }}>
+            <TextAction title="Add header" onPress={() => setHeaderRows((rows) => [...rows, { id: uid(), name: '', value: '' }])} />
+          </View>
+          {!!headerError && <Text style={{ color: theme.danger, fontSize: 12 }}>{headerError}</Text>}
+          {!!draft.token?.trim() && headerRows.some((r) => r.name.trim().toLowerCase() === 'authorization') && (
+            <Text style={{ color: theme.faint, fontSize: 12 }}>The access token replaces the Authorization header.</Text>
+          )}
+
+          <Text style={{ color: theme.faint, fontSize: 12, marginTop: 6 }}>
+            The token, header values and URL keys stay on this device; the server list syncs.
+          </Text>
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
-            <PillButton
-              title="Save"
-              disabled={!canSave}
-              onPress={() => {
-                if (!canSave) return;
-                saveMcpServer({ ...draft, name: draft.name.trim() });
-                setDraft(null);
-              }}
-            />
-            <PillButton title="Cancel" variant="secondary" onPress={() => setDraft(null)} />
+            <PillButton title="Save" disabled={!canSave} onPress={save} />
+            <PillButton title="Cancel" variant="secondary" onPress={() => edit(null)} />
           </View>
         </Card>
       ) : (
-        <PillButton title="Add MCP server" icon="plus" onPress={() => setDraft(blank())} style={{ marginTop: 20 }} />
+        <PillButton title="Add MCP server" icon="plus" onPress={() => edit(blank())} style={{ marginTop: 20 }} />
       )}
 
       {pluginServers.length > 0 && (
@@ -250,5 +382,8 @@ const styles = StyleSheet.create({
   pluginRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 64 },
   manageRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44 },
   label: { fontSize: 13, marginTop: 14, marginBottom: 6 },
+  secretRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  headerBox: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, padding: 8, paddingRight: 2, gap: 6, marginBottom: 8 },
+  iconBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 48 },
 });

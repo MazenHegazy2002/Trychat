@@ -183,17 +183,23 @@ export function expandCommand(cmd: PluginCommand, args: string): string {
 
 /**
  * If `text` starts with a known slash command, returns the expanded prompt and the command.
- * Matches "/plugin:name args" exactly, or "/name args" when only one plugin has that command.
+ * Matches "/plugin:name args", or "/name args" when only one plugin has that command. Case doesn't matter,
+ * but a match in the exact case wins: "/plugin:name" first, then "/name", then the same ignoring case.
  */
 export function resolveSlashCommand(text: string, commands: SlashCommand[]): { prompt: string; command: SlashCommand } | null {
-  // Names may be namespaced more than once, e.g. "/plugin:folder:command", and the plugin may carry its
-  // marketplace or repo, e.g. "/plugin@marketplace:command" or "/plugin@owner/repo:command".
-  const m = text.trim().match(/^\/([\w.-]+(?:@[\w./-]+)?(?::[\w./-]+)*)(?:\s+([\s\S]*))?$/);
+  // The name is everything up to the first space: names can hold any character the menu shows ("pr+check",
+  // "résumé"), be namespaced more than once ("/plugin:folder:command"), and the plugin may carry its
+  // marketplace or repo ("/plugin@marketplace:command", "/plugin@owner/repo:command").
+  const m = text.trim().match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
   if (!m) return null;
   const [, name, args = ''] = m;
-  const exact = commands.find((c) => c.fullName === name);
-  const short = commands.filter((c) => c.name === name);
-  const command = exact ?? (short.length === 1 ? short[0] : undefined);
+  const lower = name.toLowerCase();
+  const only = (list: SlashCommand[]) => (list.length === 1 ? list[0] : undefined);
+  const command =
+    commands.find((c) => c.fullName === name) ??
+    only(commands.filter((c) => c.name === name)) ??
+    only(commands.filter((c) => c.fullName.toLowerCase() === lower)) ??
+    only(commands.filter((c) => c.name.toLowerCase() === lower));
   if (!command) return null;
   return { prompt: expandCommand(command, args), command };
 }

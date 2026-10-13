@@ -8,6 +8,7 @@ import { TextPrompt } from '../components/TextPrompt';
 import { Icon } from '../components/ui';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
+import type { ChatMessage } from '../lib/types';
 
 function timeAgo(ts: number): string {
   const s = Math.floor((Date.now() - ts) / 1000);
@@ -17,6 +18,9 @@ function timeAgo(ts: number): string {
   if (s < 604800) return `${Math.floor(s / 86400)}d`;
   return new Date(ts).toLocaleDateString();
 }
+
+/** What the chat shows for a message: the typed "/command args", not the prompt it expanded to. */
+const shownText = (m: ChatMessage) => m.displayText ?? m.content;
 
 export default function ConversationsScreen() {
   const theme = useTheme();
@@ -31,7 +35,7 @@ export default function ConversationsScreen() {
   const q = query.toLowerCase();
   const list = [...conversations]
     .sort((a, b) => b.updatedAt - a.updatedAt)
-    .filter((c) => !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => m.content.toLowerCase().includes(q)));
+    .filter((c) => !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => shownText(m).toLowerCase().includes(q)));
 
   const needsSetup = !settings.apiKey || !settings.model;
 
@@ -119,7 +123,7 @@ export default function ConversationsScreen() {
           </Text>
         }
         renderItem={({ item }) => {
-          const last = [...item.messages].reverse().find((m) => !m.toolResult && m.content);
+          const last = [...item.messages].reverse().find((m) => !m.toolResult && shownText(m));
           return (
             <Pressable
               onPress={() => router.push(`/chat/${item.id}`)}
@@ -136,7 +140,7 @@ export default function ConversationsScreen() {
                 <Text style={{ color: theme.muted, fontSize: 12 }}>{timeAgo(item.updatedAt)}</Text>
               </View>
               <Text style={{ color: theme.muted, marginTop: 3 }} numberOfLines={1}>
-                {last ? last.content.replace(/\s+/g, ' ') : 'Empty chat'}
+                {last ? shownText(last).replace(/\s+/g, ' ') : 'Empty chat'}
               </Text>
               {!!projectName(item.projectId) && (
                 <View style={styles.projectTag}>

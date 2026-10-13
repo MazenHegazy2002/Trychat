@@ -1,6 +1,7 @@
-import { Stack, router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Stack, router, useFocusEffect } from 'expo-router';
+import { usePreventRemove } from 'expo-router/react-navigation';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, BackHandler, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,6 +12,7 @@ import {
   bestRemote,
   buildRemote,
   displayName,
+  placeholders,
   remoteFields,
   remoteTransport,
   searchRegistry,
@@ -18,12 +20,13 @@ import {
 import type { CatalogSource, RegistryServer, RemoteField } from '../lib/catalog';
 import { uid } from '../lib/id';
 import { inspectGithubSource, installFromMarketplace } from '../lib/pluginInstaller';
-import type { MarketplaceInfo } from '../lib/pluginInstaller';
-import { findNameConflict, pluginOrigin } from '../lib/plugins';
+import type { MarketplaceEntry, MarketplaceInfo } from '../lib/pluginInstaller';
+import { findNameConflict, missingConfig, pluginOrigin } from '../lib/plugins';
 import { findSkills, importSkill, parseGithubLink } from '../lib/skills';
 import type { SkillCandidate } from '../lib/skills';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
+import type { Plugin } from '../lib/types';
 
 type Tab = 'plugins' | 'skills' | 'mcp';
 
@@ -33,14 +36,38 @@ const skillRepoCache = new Map<string, SkillCandidate[]>();
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+
+const openPlugin = (id: string) => router.push({ pathname: '/plugins/[id]', params: { id } });
+
 export default function StoreScreen() {
   const theme = useTheme();
   const [tab, setTab] = useState<Tab>('plugins');
+  // Kept here rather than in PluginsTab, so an open marketplace survives switching tabs.
+  const browser = useMarketplaceBrowser();
+  const { close: closeMarketplace } = browser;
+  const browsing = tab === 'plugins' && !!browser.open;
   const tabs: [Tab, string][] = [
     ['plugins', 'Plugins'],
     ['skills', 'Skills'],
     ['mcp', 'MCP servers'],
   ];
+
+  // While a marketplace is open, Back (header button, iOS swipe, Android back) returns to the list of
+  // marketplaces instead of leaving the Store.
+  usePreventRemove(browsing, closeMarketplace);
+  // Android back also when nothing is under the Store to go back to (then no screen is removed, so the
+  // hook above isn't asked). Only while the Store is focused, so Back on a plugin opened from here pops that.
+  useFocusEffect(
+    useCallback(() => {
+      if (!browsing) return;
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        closeMarketplace();
+        return true;
+      });
+      return () => sub.remove();
+    }, [browsing, closeMarketplace]),
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -58,7 +85,7 @@ export default function StoreScreen() {
           </Pressable>
         ))}
       </View>
-      {tab === 'plugins' && <PluginsTab />}
+      {tab === 'plugins' && <PluginsTab browser={browser} />}
       {tab === 'skills' && <SkillsTab />}
       {tab === 'mcp' && <McpTab />}
     </View>
@@ -67,17 +94,68 @@ export default function StoreScreen() {
 
 // ---------------------------------------------------------------- Plugins
 
-function PluginsTab() {
-  const theme = useTheme();
-  const { settings, updateSettings, plugins, installPlugin, uninstallPlugin } = useStore();
+/** The marketplace open in the Plugins tab: which one, its catalog once loaded, and the search in it. */
+function useMarketplaceBrowser() {
+  const { settings } = useStore();
+  const token = settings.githubToken;
   const [open, setOpen] = useState<CatalogSource | null>(null);
   const [market, setMarket] = useState<MarketplaceInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
+  /** The plugin being installed, as "name@marketplace". */
   const [installing, setInstalling] = useState<string | null>(null);
+  // Bumped whenever a marketplace is opened or closed: a slow load for one that's no longer open is dropped,
+  // so it can't replace the page (and the Install buttons) of the marketplace opened since.
+  const request = useRef(0);
+
+  const show = useCallback(
+    async (source: CatalogSource) => {
+      const id = ++request.current;
+      setOpen(source);
+      setQuery('');
+      setError('');
+      const cached = marketplaceCache.get(source.repo);
+      setMarket(cached ?? null);
+      setLoading(!cached);
+      if (cached) return;
+      try {
+        const target = await inspectGithubSource(source.repo, token);
+        if (target.kind !== 'marketplace') {
+          throw new Error(`${source.repo} is a single plugin, not a marketplace. Install it from Settings › Plugins.`);
+        }
+        marketplaceCache.set(source.repo, target.marketplace);
+        if (id === request.current) setMarket(target.marketplace);
+      } catch (e) {
+        if (id === request.current) setError(errorText(e));
+      } finally {
+        if (id === request.current) setLoading(false);
+      }
+    },
+    [token],
+  );
+
+  const close = useCallback(() => {
+    request.current++;
+    setOpen(null);
+    setMarket(null);
+    setLoading(false);
+    setError('');
+    setQuery('');
+  }, []);
+
+  return { open, market, loading, error, query, setQuery, installing, setInstalling, show, close };
+}
+
+type MarketplaceBrowser = ReturnType<typeof useMarketplaceBrowser>;
+
+function PluginsTab({ browser }: { browser: MarketplaceBrowser }) {
+  const theme = useTheme();
+  const { settings, updateSettings } = useStore();
   const [newRepo, setNewRepo] = useState('');
   const [adding, setAdding] = useState(false);
+  /** Adding a marketplace failed (shown under that form only). */
+  const [error, setError] = useState('');
 
   const custom: CatalogSource[] = settings.marketplaces.map((repo) => ({
     repo,
@@ -87,26 +165,6 @@ function PluginsTab() {
     custom: true,
   }));
   const sources = [...BUILTIN_MARKETPLACES, ...custom.filter((c) => !BUILTIN_MARKETPLACES.some((b) => b.repo === c.repo))];
-
-  const load = async (source: CatalogSource) => {
-    setOpen(source);
-    setQuery('');
-    setError('');
-    const cached = marketplaceCache.get(source.repo);
-    if (cached) return setMarket(cached);
-    setMarket(null);
-    setLoading(true);
-    try {
-      const target = await inspectGithubSource(source.repo, settings.githubToken);
-      if (target.kind !== 'marketplace') throw new Error(`${source.repo} is a single plugin, not a marketplace. Install it from Settings › Plugins.`);
-      marketplaceCache.set(source.repo, target.marketplace);
-      setMarket(target.marketplace);
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const addMarketplace = async () => {
     const ref = parseGithubLink(newRepo);
@@ -133,111 +191,7 @@ function PluginsTab() {
       { text: 'Remove', style: 'destructive', onPress: () => updateSettings((s) => ({ marketplaces: s.marketplaces.filter((r) => r !== repo) })) },
     ]);
 
-  if (open) {
-    const q = query.trim().toLowerCase();
-    const entries = (market?.entries ?? []).filter(
-      (e) => !q || `${e.name} ${e.displayName ?? ''} ${e.description ?? ''} ${e.category ?? ''}`.toLowerCase().includes(q),
-    );
-    const shown = entries.slice(0, 150);
-    return (
-      <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-        <Pressable onPress={() => setOpen(null)} style={styles.backRow} accessibilityRole="button">
-          <Icon name="chevron-left" size={18} color={theme.primary} />
-          <Text style={{ color: theme.primary, fontWeight: '600' }}>All marketplaces</Text>
-        </Pressable>
-        <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 26 }}>{market?.name ?? open.title}</Text>
-        <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
-          {market?.owner ? `by ${market.owner} · ` : ''}
-          {open.repo}
-          {market ? ` · ${market.entries.length} plugins` : ''}
-        </Text>
-        {!!market?.description && <Text style={{ color: theme.muted, marginTop: 8, lineHeight: 20 }}>{market.description}</Text>}
-
-        <SearchBox value={query} onChange={setQuery} placeholder="Search plugins" />
-        {loading && <ActivityIndicator color={theme.primary} style={{ marginTop: 24 }} />}
-        {!!error && <Text style={{ color: theme.danger, marginTop: 12 }}>{error}</Text>}
-
-        {market && (
-          <Card style={{ marginTop: 12 }}>
-            {shown.map((entry, i) => {
-              const id = `${entry.name}@${market.name}`;
-              const installed = plugins.some((p) => p.id === id);
-              return (
-                <View key={entry.name}>
-                  {i > 0 && <Divider />}
-                  <View style={[styles.row, !entry.supported && { opacity: 0.5 }]}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>{entry.displayName ?? entry.name}</Text>
-                      {!!entry.description && (
-                        <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }} numberOfLines={2}>
-                          {entry.description}
-                        </Text>
-                      )}
-                      <Text style={{ color: theme.faint, fontSize: 12, marginTop: 4 }}>
-                        {[entry.category, entry.version && `v${entry.version}`, !entry.supported && entry.reason].filter(Boolean).join(' · ')}
-                      </Text>
-                    </View>
-                    {installed ? (
-                      <View style={styles.installed}>
-                        <Icon name="check" size={16} color={theme.accent} />
-                        <Text style={{ color: theme.muted, fontSize: 13 }}>Installed</Text>
-                      </View>
-                    ) : installing === id ? (
-                      <ActivityIndicator color={theme.primary} style={styles.installBtn} />
-                    ) : (
-                      <PillButton
-                        title="Install"
-                        disabled={!entry.supported || !!installing}
-                        onPress={async () => {
-                          setInstalling(id);
-                          try {
-                            const plugin = await installFromMarketplace(market, entry, settings.githubToken);
-                            // The same plugin from another marketplace or repo: their commands and tools would clash.
-                            const old = findNameConflict(plugins, plugin);
-                            if (!old) return installPlugin(plugin);
-                            Alert.alert(
-                              `Replace ${old.displayName ?? old.name} from ${pluginOrigin(old)}?`,
-                              `Only one plugin named “${plugin.name}” can be installed. The one from ${pluginOrigin(plugin)} replaces it, and its settings are removed.`,
-                              [
-                                { text: 'Cancel', style: 'cancel' },
-                                {
-                                  text: 'Replace',
-                                  style: 'destructive',
-                                  onPress: () => {
-                                    uninstallPlugin(old.id);
-                                    installPlugin(plugin);
-                                  },
-                                },
-                              ],
-                            );
-                          } catch (e) {
-                            Alert.alert(`Couldn’t install ${entry.name}`, errorText(e));
-                          } finally {
-                            setInstalling(null);
-                          }
-                        }}
-                        style={styles.installBtn}
-                      />
-                    )}
-                  </View>
-                </View>
-              );
-            })}
-            {!shown.length && <Text style={{ color: theme.muted, padding: 16 }}>No plugins match “{query}”.</Text>}
-          </Card>
-        )}
-        {entries.length > shown.length && (
-          <Text style={{ color: theme.faint, fontSize: 12, marginTop: 8 }}>
-            Showing {shown.length} of {entries.length} — search to narrow it down.
-          </Text>
-        )}
-        <Text style={{ color: theme.faint, fontSize: 12, marginTop: 16, lineHeight: 17 }}>
-          Plugins can add instructions and tools to your chats. Only install plugins from sources you trust — third-party
-          marketplaces aren’t reviewed by Anthropic.
-        </Text>
-      </KeyboardAwareScrollView>
-    );
-  }
+  if (browser.open) return <MarketplacePage source={browser.open} browser={browser} />;
 
   return (
     <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
@@ -249,7 +203,7 @@ function PluginsTab() {
           <View key={s.repo}>
             {i > 0 && <Divider />}
             <Pressable
-              onPress={() => load(s)}
+              onPress={() => browser.show(s)}
               onLongPress={s.custom ? () => removeMarketplace(s.repo) : undefined}
               style={styles.row}
               accessibilityRole="button"
@@ -273,7 +227,10 @@ function PluginsTab() {
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
         <TextInput
           value={newRepo}
-          onChangeText={setNewRepo}
+          onChangeText={(v) => {
+            setNewRepo(v);
+            if (error) setError('');
+          }}
           placeholder="owner/repo or GitHub link"
           placeholderTextColor={theme.faint}
           autoCapitalize="none"
@@ -285,6 +242,152 @@ function PluginsTab() {
       {!!error && <Text style={{ color: theme.danger, marginTop: 8 }}>{error}</Text>}
       <Text style={{ color: theme.faint, fontSize: 12, marginTop: 8 }}>
         Any GitHub repo with a .claude-plugin/marketplace.json works. Your marketplaces sync with your account.
+      </Text>
+    </KeyboardAwareScrollView>
+  );
+}
+
+/** One marketplace's plugins, with search and Install. */
+function MarketplacePage({ source, browser }: { source: CatalogSource; browser: MarketplaceBrowser }) {
+  const theme = useTheme();
+  const { settings, plugins, installPlugin, uninstallPlugin } = useStore();
+  const { market, loading, error, query, setQuery, installing, setInstalling, close } = browser;
+
+  const installedFrom = (m: MarketplaceInfo, entry: MarketplaceEntry) =>
+    plugins.find((p) => p.id === `${entry.name}@${m.name}` || (p.marketplace === m.name && p.name === entry.name));
+
+  /** Installs `plugin`, then offers to open its settings when it needs values to work. */
+  const finishInstall = (plugin: Plugin) => {
+    installPlugin(plugin);
+    const missing = missingConfig(plugin);
+    if (!missing.length) return;
+    Alert.alert(`${plugin.displayName ?? plugin.name} needs setup`, `Add ${missing.join(', ')} so it works.`, [
+      { text: 'Later', style: 'cancel' },
+      { text: 'Set up', onPress: () => openPlugin(plugin.id) },
+    ]);
+  };
+
+  const install = async (m: MarketplaceInfo, entry: MarketplaceEntry) => {
+    if (installing) return;
+    setInstalling(`${entry.name}@${m.name}`);
+    try {
+      const plugin = await installFromMarketplace(m, entry, settings.githubToken);
+      // The same plugin from another marketplace or repo: their commands and tools would clash.
+      const old = findNameConflict(plugins, plugin);
+      if (!old) return finishInstall(plugin);
+      Alert.alert(
+        `Replace ${old.displayName ?? old.name} from ${pluginOrigin(old)}?`,
+        `Only one plugin named “${plugin.name}” can be installed. The one from ${pluginOrigin(plugin)} replaces it, and its settings are removed.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Replace',
+            style: 'destructive',
+            onPress: () => {
+              uninstallPlugin(old.id);
+              finishInstall(plugin);
+            },
+          },
+        ],
+      );
+    } catch (e) {
+      Alert.alert(`Couldn’t install ${entry.name}`, errorText(e));
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  const q = query.trim().toLowerCase();
+  const entries = (market?.entries ?? []).filter(
+    (e) => !q || `${e.name} ${e.displayName ?? ''} ${e.description ?? ''} ${e.category ?? ''}`.toLowerCase().includes(q),
+  );
+  const shown = entries.slice(0, 150);
+  const empty = !!market && market.entries.length === 0;
+
+  return (
+    <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+      <Pressable onPress={close} style={styles.backRow} accessibilityRole="button">
+        <Icon name="chevron-left" size={18} color={theme.primary} />
+        <Text style={{ color: theme.primary, fontWeight: '600' }}>All marketplaces</Text>
+      </Pressable>
+      <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 26 }}>{market?.name ?? source.title}</Text>
+      <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
+        {market?.owner ? `by ${market.owner} · ` : ''}
+        {source.repo}
+        {market ? ` · ${plural(market.entries.length, 'plugin')}` : ''}
+      </Text>
+      {!!market?.description && <Text style={{ color: theme.muted, marginTop: 8, lineHeight: 20 }}>{market.description}</Text>}
+
+      {!empty && <SearchBox value={query} onChange={setQuery} placeholder="Search plugins" />}
+      {loading && <ActivityIndicator color={theme.primary} style={{ marginTop: 24 }} />}
+      {!!error && <Text style={{ color: theme.danger, marginTop: 12 }}>{error}</Text>}
+
+      {empty && (
+        <Card style={{ marginTop: 12, padding: 16 }}>
+          <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>No plugins here yet</Text>
+          <Text style={{ color: theme.muted, fontSize: 14, lineHeight: 20, marginTop: 4 }}>
+            This marketplace doesn’t list any plugins right now. Check back later, or try another marketplace.
+          </Text>
+        </Card>
+      )}
+
+      {!!market && !empty && (
+        <Card style={{ marginTop: 12 }}>
+          {shown.map((entry, i) => {
+            const id = `${entry.name}@${market.name}`;
+            const installed = installedFrom(market, entry);
+            const title = entry.displayName ?? entry.name;
+            return (
+              <View key={entry.name}>
+                {i > 0 && <Divider />}
+                <View style={[styles.row, !entry.supported && { opacity: 0.5 }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>{title}</Text>
+                    {!!entry.description && (
+                      <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }} numberOfLines={2}>
+                        {entry.description}
+                      </Text>
+                    )}
+                    <Text style={{ color: theme.faint, fontSize: 12, marginTop: 4 }}>
+                      {[entry.category, entry.version && `v${entry.version}`, !entry.supported && entry.reason].filter(Boolean).join(' · ')}
+                    </Text>
+                  </View>
+                  {installed ? (
+                    <Pressable
+                      onPress={() => openPlugin(installed.id)}
+                      style={({ pressed }) => [styles.installed, pressed && { opacity: 0.6 }]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${title} is installed. Open it`}
+                    >
+                      <Icon name="check" size={16} color={theme.accent} />
+                      <Text style={{ color: theme.muted, fontSize: 13 }}>Installed</Text>
+                      <Icon name="chevron-right" size={14} color={theme.faint} />
+                    </Pressable>
+                  ) : installing === id ? (
+                    <ActivityIndicator color={theme.primary} style={styles.installBtn} />
+                  ) : (
+                    <PillButton
+                      title="Install"
+                      disabled={!entry.supported || !!installing}
+                      onPress={() => install(market, entry)}
+                      style={styles.installBtn}
+                    />
+                  )}
+                </View>
+              </View>
+            );
+          })}
+          {!shown.length && <Text style={{ color: theme.muted, padding: 16 }}>No plugins match “{query.trim()}”.</Text>}
+        </Card>
+      )}
+      {entries.length > shown.length && (
+        <Text style={{ color: theme.faint, fontSize: 12, marginTop: 8 }}>
+          Showing {shown.length} of {entries.length} — search to narrow it down.
+        </Text>
+      )}
+      <Text style={{ color: theme.faint, fontSize: 12, marginTop: 16, lineHeight: 17 }}>
+        Plugins can add instructions and tools to your chats. Only install plugins from sources you trust — third-party
+        marketplaces aren’t reviewed by Anthropic.
       </Text>
     </KeyboardAwareScrollView>
   );
@@ -417,17 +520,26 @@ function McpTab() {
     return () => clearTimeout(t);
   }, [query]);
 
+  const search = (q: string) => {
+    setQuery(q);
+    // Results on screen are for the old text until the debounced search lands: no "Load more" for them meanwhile.
+    setLoading(true);
+  };
+
   const more = async () => {
     if (!cursor || loading) return;
+    // The next page belongs to the search on screen; a search started since makes it stale.
+    const id = searchId.current;
     setLoading(true);
     try {
       const r = await searchRegistry(query, cursor);
+      if (id !== searchId.current) return;
       setServers((s) => [...s, ...r.servers.filter((x) => !s.some((y) => y.name === x.name))]);
       setCursor(r.nextCursor);
     } catch (e) {
-      setError(errorText(e));
+      if (id === searchId.current) setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (id === searchId.current) setLoading(false);
     }
   };
 
@@ -439,7 +551,14 @@ function McpTab() {
   const add = (s: RegistryServer, values: Record<string, string> = {}) => {
     const remote = bestRemote(s);
     if (!remote) return;
-    const { url, headers, urlSecrets } = buildRemote(remote, values);
+    // Pasted keys often carry a stray space or line break.
+    const typed = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.trim()]));
+    // URL variables are percent-encoded, so a value with "/", "?", "#", "&" or spaces can't change the URL's shape
+    // (one left empty becomes empty rather than a literal "{name}"). Secret ones go to urlSecrets already encoded:
+    // the MCP client fills them into the URL as they are.
+    const inUrl = Object.fromEntries(placeholders(remote.url).map((k) => [k, encodeURIComponent(typed[k] ?? '')]));
+    const { url, urlSecrets } = buildRemote(remote, { ...typed, ...inUrl });
+    const { headers } = buildRemote(remote, typed);
     saveMcpServer({
       id: uid(),
       name: displayName(s),
@@ -459,7 +578,7 @@ function McpTab() {
       <ScreenIntro title="MCP servers">
         From the official MCP Registry. Remote servers work on your phone; ones that run on a computer are marked.
       </ScreenIntro>
-      <SearchBox value={query} onChange={setQuery} placeholder="Search servers, e.g. notion, github, maps" />
+      <SearchBox value={query} onChange={search} placeholder="Search servers, e.g. notion, github, maps" />
       {!!error && <Text style={{ color: theme.danger, marginTop: 8 }}>{error}</Text>}
       <Card style={{ marginTop: 12 }}>
         {servers.map((s, i) => {
@@ -632,15 +751,15 @@ function SearchBox({ value, onChange, placeholder }: { value: string; onChange: 
 const styles = StyleSheet.create({
   page: { padding: 20, paddingBottom: 48 },
   segment: { flexDirection: 'row', borderRadius: 999, padding: 4, marginHorizontal: 20, marginTop: 8 },
-  segmentItem: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
+  segmentItem: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 64 },
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44, marginBottom: 4 },
   linkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48, marginTop: 16 },
-  installBtn: { minHeight: 40, paddingHorizontal: 16 },
-  installed: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 40 },
+  installBtn: { minHeight: 44, paddingHorizontal: 16 },
+  installed: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44 },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, marginTop: 4 },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 48 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerBtn: { minWidth: 60, minHeight: 44, justifyContent: 'center' },
-  choice: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, minHeight: 40, justifyContent: 'center' },
+  choice: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, minHeight: 44, justifyContent: 'center' },
 });
