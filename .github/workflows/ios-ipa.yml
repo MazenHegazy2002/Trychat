@@ -43,8 +43,10 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build | tail -n 50
+            build > build.log 2>&1 || { grep -nE "error:|BUILD FAILED|fatal" build.log | head -80; tail -n 60 build.log; exit 1; }
+          tail -n 5 build.log
           APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          [ -n "$APP" ] || { echo "No .app was built"; exit 1; }
           mkdir -p Payload && cp -R "$APP" Payload/
           zip -qry "../TryChat-${{ github.run_number }}-unsigned.ipa" Payload
 
@@ -52,3 +54,4 @@ jobs:
         with:
           name: TryChat-ipa-${{ github.run_number }}
           path: TryChat-${{ github.run_number }}-unsigned.ipa
+          if-no-files-found: error
