@@ -78,6 +78,17 @@ function SignedIn() {
         </View>
       </Card>
 
+      <Pressable onPress={() => router.push('/friends')} accessibilityRole="button" style={{ marginTop: 12 }}>
+        <Card style={styles.friendsRow}>
+          <Icon name="users" size={18} color={theme.text} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.text, fontSize: 15 }}>Friends</Text>
+            <Text style={{ color: theme.muted, fontSize: 13, marginTop: 1 }}>Share files with friends on this server</Text>
+          </View>
+          <Icon name="chevron-right" size={16} />
+        </Card>
+      </Pressable>
+
       <SectionLabel>Account server</SectionLabel>
       <Card style={{ padding: 16 }}>
         <Text style={{ color: theme.text, fontFamily: 'monospace', fontSize: 14 }}>{account.serverUrl}</Text>
@@ -261,6 +272,7 @@ const styles = StyleSheet.create({
   stats: { flexDirection: 'row', gap: 8, marginTop: 14 },
   stat: { flex: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   syncRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14 },
+  friendsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 60 },
   signOut: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 24 },
   segment: { flexDirection: 'row', borderRadius: 999, padding: 4, marginTop: 24 },
   segmentItem: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },

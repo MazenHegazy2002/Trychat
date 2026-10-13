@@ -248,6 +248,7 @@ export type InstallItem =
 
 /** Another account the user is friends with (or has a pending request with). */
 export interface Friend {
+  /** The other account's id; for an outgoing request, the request's id. */
   id: string;
   email: string;
   name: string;
@@ -264,6 +265,12 @@ export interface SharedFile {
   owner: { id: string; name: string; email: string };
   /** Friend ids it is shared with (only listed for the owner). */
   sharedWith: string[];
+  /** Who it is shared with (only for the owner). */
+  recipients?: { id: string; name: string; email: string }[];
+  /** Set by the app on upload so the same local file is reused instead of uploaded again (owner only). */
+  key?: string;
   note?: string;
   createdAt: number;
+  /** When it was (last) shared with the viewer, or by the owner. */
+  sharedAt?: number;
 }
