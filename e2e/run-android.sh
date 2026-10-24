@@ -4,6 +4,12 @@ set -u
 OUT=e2e-out; mkdir -p "$OUT/screenshots"
 adb install -r android/app/build/outputs/apk/release/app-release.apk
 adb logcat -c
+# Launch probe: what is in front of the app 25 s after a cold start (dialogs, ANRs, permission prompts).
+adb shell monkey -p com.trychat.app -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+sleep 25
+{ adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp"; adb shell dumpsys activity activities | grep -E "topResumedActivity|mResumedActivity" | head -5; } > "$OUT/probe-launch.txt" 2>&1 || true
+adb exec-out screencap -p > "$OUT/probe-launch.png" || true
+adb shell am force-stop com.trychat.app || true
 adb logcat -v time > "$OUT/logcat.txt" 2>&1 &
 LOGPID=$!
 # screenrecord caps at 180 s per file, so record in a loop of segments.
