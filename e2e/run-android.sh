@@ -12,6 +12,11 @@ RECPID=$!
 maestro test e2e --format junit --output "$OUT/report.xml" \
   --test-output-dir "$OUT/maestro" --debug-output "$OUT/maestro-debug"
 STATUS=$?
+# Keyboard probe: a new chat with text typed, then what's on screen (view tree, keyboard, screenshot).
+maestro test e2e/probe/keyboard.yaml --test-output-dir "$OUT/probe" || true
+maestro hierarchy --compact > "$OUT/probe-hierarchy.csv" 2>/dev/null || true
+{ adb shell dumpsys input_method | grep -E "mInputShown|mIsInputViewShown|mImeWindowVis"; adb shell dumpsys window windows | grep -E "InputMethod|mFrame=|mGivenContentInsets|ime" | head -40; adb shell wm size; adb shell wm density; } > "$OUT/probe-ime.txt" 2>&1 || true
+adb exec-out screencap -p > "$OUT/probe-keyboard.png" || true
 kill $RECPID 2>/dev/null; adb shell pkill -INT screenrecord || true; sleep 4
 for f in $(adb shell ls /sdcard/ | tr -d '\r' | grep '^e2e-.*mp4$'); do adb pull "/sdcard/$f" "$OUT/" || true; done
 find "$OUT/maestro" -name '*.png' -exec cp {} "$OUT/screenshots/" \; 2>/dev/null || true

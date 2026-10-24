@@ -4,5 +4,5 @@ name: Account
 - launchApp
 - extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
 - runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "account" } }
-- extendedWaitUntil: { visible: "Account", timeout: 15000 }
+- extendedWaitUntil: { visible: "Account|Sign in|Create account", timeout: 15000 }   # signed out: the sign-in form, no title
 - takeScreenshot: account

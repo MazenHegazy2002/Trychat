@@ -71,6 +71,12 @@ jobs:
         if: always()
         run: grep -nE -A30 "FATAL EXCEPTION" e2e-out/logcat.txt | head -100 || echo "No FATAL EXCEPTION in logcat."
 
+      - name: Report (results, keyboard probe, small screenshots)
+        if: always()
+        run: |
+          python3 -m venv /tmp/rv && /tmp/rv/bin/pip install -q pillow || true
+          /tmp/rv/bin/python e2e/report.py e2e-out || python3 e2e/report.py e2e-out || true
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

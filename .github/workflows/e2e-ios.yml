@@ -82,6 +82,10 @@ jobs:
           maestro --device "$UDID" test e2e --format junit --output e2e-out/report.xml \
             --test-output-dir e2e-out/maestro --debug-output e2e-out/maestro-debug
           STATUS=$?
+          # Keyboard probe: a new chat with text typed, then what's on screen.
+          maestro --device "$UDID" test e2e/probe/keyboard.yaml --test-output-dir e2e-out/probe
+          maestro --device "$UDID" hierarchy --compact > e2e-out/probe-hierarchy.csv 2>/dev/null
+          xcrun simctl io "$UDID" screenshot e2e-out/probe-keyboard.png
           kill -INT $REC; kill $LOG; sleep 5
           find e2e-out/maestro . -maxdepth 3 -name '*.png' -not -path './e2e-out/screenshots/*' -exec cp {} e2e-out/screenshots/ \; 2>/dev/null
           # Crash check: a crash report for TryChat, or the app no longer running.
@@ -90,6 +94,12 @@ jobs:
           fi
           xcrun simctl spawn "$UDID" launchctl list | grep -q com.trychat.app || { echo "::error::TryChat is not running"; exit 1; }
           exit $STATUS
+
+      - name: Report (results, keyboard probe, small screenshots)
+        if: always()
+        run: |
+          python3 -m venv /tmp/rv && /tmp/rv/bin/pip install -q pillow || true
+          /tmp/rv/bin/python e2e/report.py e2e-out || python3 e2e/report.py e2e-out || true
 
       - uses: actions/upload-artifact@v4
         if: always()

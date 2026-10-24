@@ -1,0 +1,11 @@
+# Leaves a new chat open with text typed and the keyboard up, for the report's hierarchy dump.
+appId: com.trychat.app
+name: Keyboard probe
+---
+- launchApp
+- extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
+- tapOn: ".*New chat"
+- extendedWaitUntil: { visible: "How can I help you today?", timeout: 15000 }
+- tapOn: "How can I help you today?"
+- inputText: "Hello from Maestro"
+- waitForAnimationToEnd: { timeout: 3000 }
