@@ -65,16 +65,19 @@ export default function ConversationsScreen() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <View style={{ flexDirection: 'row', gap: 18, alignItems: 'center' }}>
+            <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
               <TasksPill />
               <Pressable onPress={() => router.push('/workspaces')} hitSlop={8} accessibilityLabel="Workspaces">
                 <Icon name="code" size={19} color={theme.primary} />
               </Pressable>
-              <Pressable onPress={() => router.push('/memory')} hitSlop={8}>
-                <Text style={{ color: theme.primary, fontSize: 15, fontWeight: '600' }}>Memory ({memories.length})</Text>
+              <Pressable onPress={() => router.push('/designs')} hitSlop={8} accessibilityLabel="Design studio">
+                <Icon name="pen-tool" size={19} color={theme.primary} />
               </Pressable>
-              <Pressable onPress={() => router.push('/settings')} hitSlop={8}>
-                <Text style={{ color: theme.primary, fontSize: 15, fontWeight: '600' }}>Settings</Text>
+              <Pressable onPress={() => router.push('/memory')} hitSlop={8} accessibilityLabel={`Memory (${memories.length})`}>
+                <Icon name="book-open" size={19} color={theme.primary} />
+              </Pressable>
+              <Pressable onPress={() => router.push('/settings')} hitSlop={8} accessibilityLabel="Settings">
+                <Icon name="settings" size={19} color={theme.primary} />
               </Pressable>
             </View>
           ),

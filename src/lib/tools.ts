@@ -4,6 +4,7 @@ import { runOnLaptop } from './laptopStream';
 import { appendTask, setTaskCancel, setTaskExit, withTask } from './tasks';
 import type { TaskKind } from './tasks';
 import { FILE_TOOL_LABELS, fileTools, saveRunnerFiles } from './fileTools';
+import { DESIGN_TOOL_LABELS, designTools } from './designTools';
 import { GITHUB_TOOLS } from './github';
 import { phoneTools } from './phoneTools';
 import type { AgentProfile } from './plugins';
@@ -277,7 +278,7 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
   }
 
   // Files sent to the user, the phone folder, friends & shared files, the Store, and the web.
-  Object.assign(tools, fileTools(ctx), phoneTools(ctx), socialTools(ctx), storeTools(ctx), webTools(ctx), workspaceTools(ctx));
+  Object.assign(tools, fileTools(ctx), designTools(ctx), phoneTools(ctx), socialTools(ctx), storeTools(ctx), webTools(ctx), workspaceTools(ctx));
 
   // Servers whose names slug alike (a user's "Linear API" and plugin linear's "api") would get the same tool names,
   // and the later one would silently replace the earlier one's tools. The first keeps the plain names (user servers
@@ -518,6 +519,7 @@ export function toolLabel(call: ToolCall, ctx?: ToolContext): string {
     // fall through
   }
   if (FILE_TOOL_LABELS[call.name]) return FILE_TOOL_LABELS[call.name](call.args);
+  if (DESIGN_TOOL_LABELS[call.name]) return DESIGN_TOOL_LABELS[call.name](call.args);
   if (call.name.startsWith('mcp.')) return `Used ${call.name.split('.').slice(2).join('.')} (${call.name.split('.')[1]})`;
   if (call.name === 'code.run') return `Ran ${call.args.language ?? 'code'}`;
   if (call.name === 'agents.run') return 'Sent sub-agents';

@@ -1,5 +1,10 @@
+# Maestro workspace config. Run the suite with `maestro test e2e` (the folder): given a .yaml file,
+# Maestro 2.x reads it as a single flow. flowsOrder uses each flow's `name:`.
 flows:
   - "flows/*"
 executionOrder:
   continueOnFailure: true
-  flowsOrder: [01_launch, 02_settings, 03_chat]
+  flowsOrder:
+    - Launch
+    - Settings and every row
+    - Chat composer, attach sheet, slash menu

@@ -52,6 +52,9 @@ function Navigator() {
       <Stack.Screen name="projects/index" options={{ title: 'Projects' }} />
       <Stack.Screen name="projects/[id]" options={{ title: '' }} />
       <Stack.Screen name="projects/new" options={{ title: 'New project' }} />
+      <Stack.Screen name="designs/index" options={{ title: 'Design' }} />
+      <Stack.Screen name="designs/[id]" options={{ title: '' }} />
+      <Stack.Screen name="designs/play" options={{ title: 'Preview', presentation: 'fullScreenModal' }} />
       <Stack.Screen name="preview" options={{ title: 'Preview', presentation: 'modal' }} />
     </Stack>
   );

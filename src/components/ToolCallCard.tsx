@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { DesignToolCard } from './DesignViews';
 import { InstallCard } from './InstallCard';
 import { storeToolLabel } from '../lib/storeTools';
 import { useTheme } from '../lib/theme';
@@ -30,6 +31,7 @@ export function ToolCallCard({ call, onApprove, onDeny }: Props) {
   const service = toolService(call);
   // store.install has its own card: what it adds, the assistant's reason, and fields for keys.
   if (call.name === 'store.install') return <InstallCard call={call} onApprove={onApprove} onDeny={onDeny} />;
+  if (call.name.startsWith('design.') && call.status !== 'pending') return <DesignToolCard call={call} />;
   const label = storeToolLabel(call) ?? toolLabel(call);
   const where =
     {

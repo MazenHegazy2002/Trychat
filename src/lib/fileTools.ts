@@ -137,7 +137,7 @@ export async function readFileText(a: Pick<Attachment, 'uri' | 'name' | 'mimeTyp
 
 // ---------- PDF & image rendering ----------
 
-async function makePdf(name: string, input: { html?: string; markdown?: string; pageSize?: PageSize }): Promise<Attachment> {
+export async function makePdf(name: string, input: { html?: string; markdown?: string; pageSize?: PageSize }): Promise<Attachment> {
   const safe = sanitizeFileName(name.replace(/\.pdf$/i, '') + '.pdf', 'application/pdf');
   const html = printableHtml({ ...input, title: safe.replace(/\.pdf$/i, '') });
   const size = PAGE_SIZES[input.pageSize === 'a4' ? 'a4' : 'letter'];

@@ -79,7 +79,7 @@ jobs:
           xcrun simctl spawn "$UDID" log stream --level error --predicate 'process == "TryChat"' > e2e-out/system.log 2>&1 &
           LOG=$!
           set +e
-          maestro --device "$UDID" test e2e/config.yaml --format junit --output e2e-out/report.xml \
+          maestro --device "$UDID" test e2e --format junit --output e2e-out/report.xml \
             --test-output-dir e2e-out/maestro --debug-output e2e-out/maestro-debug
           STATUS=$?
           kill -INT $REC; kill $LOG; sleep 5

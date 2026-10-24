@@ -9,7 +9,7 @@ LOGPID=$!
 # screenrecord caps at 180 s per file, so record in a loop of segments.
 ( i=0; while true; do adb shell screenrecord --time-limit 180 /sdcard/e2e-$i.mp4 || break; i=$((i+1)); done ) &
 RECPID=$!
-maestro test e2e/config.yaml --format junit --output "$OUT/report.xml" \
+maestro test e2e --format junit --output "$OUT/report.xml" \
   --test-output-dir "$OUT/maestro" --debug-output "$OUT/maestro-debug"
 STATUS=$?
 kill $RECPID 2>/dev/null; adb shell pkill -INT screenrecord || true; sleep 4
