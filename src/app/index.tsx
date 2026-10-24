@@ -1,3 +1,4 @@
+import { TasksPill } from '../components/TasksPill';
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -64,7 +65,11 @@ export default function ConversationsScreen() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <View style={{ flexDirection: 'row', gap: 18 }}>
+            <View style={{ flexDirection: 'row', gap: 18, alignItems: 'center' }}>
+              <TasksPill />
+              <Pressable onPress={() => router.push('/workspaces')} hitSlop={8} accessibilityLabel="Workspaces">
+                <Icon name="code" size={19} color={theme.primary} />
+              </Pressable>
               <Pressable onPress={() => router.push('/memory')} hitSlop={8}>
                 <Text style={{ color: theme.primary, fontSize: 15, fontWeight: '600' }}>Memory ({memories.length})</Text>
               </Pressable>

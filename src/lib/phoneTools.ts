@@ -360,3 +360,44 @@ export function phoneTools(ctx: ToolContext): Record<string, ToolDef> {
   };
   return Object.fromEntries(Object.entries(tools).map(([n, t]) => [n, { ...t, service: 'phone' as const }]));
 }
+
+/** Structured access to the phone folder for the Workspaces editor. */
+export function phoneFs(folder: PhoneFolder) {
+  const at = (p: string) => {
+    const root = openRoot(folder);
+    return { root, ...locate(folder, root, p) };
+  };
+  return {
+    list(path: string): { name: string; path: string; isDir: boolean; size?: number }[] {
+      const { root, child, path: rel } = at(path);
+      if (child && !child.isDir) throw new Error(`${rel} is a file.`);
+      return children(child ? (child.entry as Directory) : root, root)
+        .map((c) => ({ name: c.name, path: join(rel, c.name), isDir: c.isDir, size: c.isDir ? undefined : sizeOf(c.entry as File) }))
+        .sort((x, y) => Number(y.isDir) - Number(x.isDir) || x.name.localeCompare(y.name));
+    },
+    async read(path: string): Promise<string> {
+      const { child, path: rel } = at(path);
+      if (!child || child.isDir) throw new Error(`${rel || 'That'} is a folder.`);
+      const file = child.entry as File;
+      const { bytes, partial } = await readBytes(file, sizeOf(file));
+      if (hasBinaryExtension(child.name) || looksBinary(child.name, bytes)) throw new Error(`${rel} is a binary file.`);
+      if (partial) throw new Error(`${rel} is too big to edit here.`);
+      return decodeText(bytes);
+    },
+    remove(path: string) {
+      const { child } = at(path);
+      if (!child) throw new Error("Can't delete the shared folder itself.");
+      child.entry.delete();
+    },
+    mkdir(path: string) {
+      const segs = splitPath(path);
+      const root = openRoot(folder);
+      let dir = root;
+      for (const seg of segs) {
+        const found = findChild(children(dir, root), seg);
+        if (found && !found.isDir) throw new Error(`${seg} is a file.`);
+        dir = found ? (found.entry as Directory) : dir.createDirectory(seg);
+      }
+    },
+  };
+}

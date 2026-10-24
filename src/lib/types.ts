@@ -52,6 +52,8 @@ export interface Conversation {
   model: string;
   /** The project (folder) this chat belongs to. */
   projectId?: string;
+  /** The workspace attached to this chat (ws.* tools). */
+  workspaceId?: string;
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;

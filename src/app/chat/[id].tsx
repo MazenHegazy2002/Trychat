@@ -1,3 +1,4 @@
+import { TasksPill } from '../../components/TasksPill';
 import * as Clipboard from 'expo-clipboard';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useRef, useState } from 'react';
@@ -230,6 +231,8 @@ export default function ChatScreen() {
             </Pressable>
           ),
           headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TasksPill conversationId={conv.id} hideWhenIdle />
             <Pressable
               onPress={() => setMoving(true)}
               style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
@@ -237,6 +240,7 @@ export default function ChatScreen() {
             >
               <Icon name="folder" size={20} color={project ? theme.primary : theme.text} />
             </Pressable>
+            </View>
           ),
         }}
       />

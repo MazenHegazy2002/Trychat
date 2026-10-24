@@ -1,5 +1,8 @@
 import { callMcpTool, mcpToolName } from './mcp';
 import { normalizeLanguage, runCodeWithFiles } from './runner';
+import { runOnLaptop } from './laptopStream';
+import { appendTask, setTaskCancel, setTaskExit, withTask } from './tasks';
+import type { TaskKind } from './tasks';
 import { FILE_TOOL_LABELS, fileTools, saveRunnerFiles } from './fileTools';
 import { GITHUB_TOOLS } from './github';
 import { phoneTools } from './phoneTools';
@@ -8,6 +11,7 @@ import { socialTools } from './socialTools';
 import { storeTools } from './storeTools';
 import type { Account, Attachment, InstallItem, McpServer, McpTool, Plugin, Settings, Skill, ToolCall } from './types';
 import { webTools } from './webTools';
+import { workspacePrompt, workspaceTools } from './workspace/tools';
 import { FILES, withFiles } from './toolResult';
 
 /**
@@ -19,7 +23,7 @@ import { FILES, withFiles } from './toolResult';
 
 /** 'install' always asks the user first. */
 export type Kind = 'read' | 'write' | 'command' | 'code' | 'agent' | 'mcp' | 'install';
-export type Service = 'github' | 'laptop' | 'code' | 'agents' | 'skills' | 'mcp' | 'files' | 'friends' | 'store' | 'phone' | 'web';
+export type Service = 'github' | 'laptop' | 'code' | 'agents' | 'skills' | 'mcp' | 'files' | 'friends' | 'store' | 'phone' | 'web' | 'workspace';
 
 /** Everything a tool may need at run time. */
 export interface ToolContext {
@@ -40,6 +44,12 @@ export interface ToolContext {
   install?: (item: InstallItem) => Promise<string>;
   /** Values the user typed into the approval card (e.g. API keys). Never stored in the chat. */
   approval?: { secrets?: Record<string, string> };
+  /** Set by runToolCall: the task this call's output goes to (see tasks.ts). */
+  taskId?: string;
+  /** The chat this call belongs to, for the task registry. */
+  conversationId?: string;
+  /** The workspace attached to the chat (ws.* tools). */
+  workspaceId?: string;
 }
 
 export interface ToolDef {
@@ -158,10 +168,16 @@ const STATIC_TOOLS: Record<string, Omit<ToolDef, 'run'> & { run: (s: Settings, a
     params: '{"command":"npm test","cwd":"optional/folder"}',
     label: (a) => `Run \`${a.command}\` on your laptop`,
     run: async (s, a) => {
-      const r = await bridge(s, '/run', { command: a.command, cwd: a.cwd ?? '.' });
+      const taskId = (s as Settings & { taskId?: string }).taskId;
+      const h = runOnLaptop(s, { command: String(a.command), cwd: a.cwd ?? '.' }, (_stream, text) => appendTask(taskId, text));
+      setTaskCancel(taskId, h.kill);
+      const r = await h.done;
+      setTaskExit(taskId, r.exitCode);
       const how = r.timedOut
         ? ` (timed out${r.timeoutMs ? ` after ${r.timeoutMs / 1000}s` : ''}; it and its child processes were stopped)`
-        : r.outputLimit
+        : r.killed
+          ? ' (stopped by the user)'
+          : r.outputLimit
           ? ` (stopped after printing more than ${Math.round(r.outputLimit / 1048576)} MB)`
           : r.signal
             ? ` (killed by signal ${r.signal})`
@@ -190,7 +206,7 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
   const tools: Record<string, ToolDef> = {};
   for (const [name, t] of Object.entries(STATIC_TOOLS)) {
     if ((t.service === 'github' && githubConnected(s)) || (t.service === 'laptop' && laptopConnected(s))) {
-      tools[name] = { ...t, run: (c, a) => t.run(c.settings, a) };
+      tools[name] = { ...t, run: (c, a) => t.run(c.taskId ? ({ ...c.settings, taskId: c.taskId } as Settings) : c.settings, a) };
     }
   }
 
@@ -261,7 +277,7 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
   }
 
   // Files sent to the user, the phone folder, friends & shared files, the Store, and the web.
-  Object.assign(tools, fileTools(ctx), phoneTools(ctx), socialTools(ctx), storeTools(ctx), webTools(ctx));
+  Object.assign(tools, fileTools(ctx), phoneTools(ctx), socialTools(ctx), storeTools(ctx), webTools(ctx), workspaceTools(ctx));
 
   // Servers whose names slug alike (a user's "Linear API" and plugin linear's "api") would get the same tool names,
   // and the later one would silently replace the earlier one's tools. The first keeps the plain names (user servers
@@ -331,6 +347,8 @@ ${tools.map(([name, t]) => `- ${name} ${t.params} — ${t.description}`).join('\
       `When a task needs a capability, tool, integration or skill you don't have, look for it with store.search (short keywords), then ask to install the best match with store.install and a one-line reason. The user approves it and enters any API keys on the install card; never ask for keys in the chat. Once it's installed, use the new tools or skills right away and finish the task. Never say something is installed unless store.install succeeded.`,
     );
   }
+  const ws = workspacePrompt(ctx);
+  if (ws) parts.push(ws);
   if (ctx.settings.repos.length && githubConnected(ctx.settings)) {
     parts.push(
       `The user's connected GitHub repositories (pinned in Connections): ${ctx.settings.repos.join(', ')}. Use these when they say "my repo" or "the repo"${
@@ -485,6 +503,7 @@ const SERVICE_OF_PREFIX: Record<string, Service> = {
   shared: 'friends',
   store: 'store',
   web: 'web',
+  ws: 'workspace',
 };
 
 export function toolService(call: ToolCall): Service | null {
@@ -526,6 +545,7 @@ export function codeUsesNetwork(language: string, code: string): boolean {
 export function needsApproval(call: ToolCall, ctx: ToolContext): boolean {
   const def = getTools(ctx)[call.name];
   const s = ctx.settings;
+  if (call.name === 'ws.commit') return true;
   switch (def?.kind) {
     case 'command':
       return s.confirmCommands;
@@ -545,10 +565,24 @@ export function needsApproval(call: ToolCall, ctx: ToolContext): boolean {
 }
 
 /** Runs a tool; `files` are any files it sent to the user. */
+const TASK_KINDS: Partial<Record<Service, TaskKind>> = { laptop: 'command', code: 'code', agents: 'subagent', store: 'install' };
+
 export async function runToolCall(call: ToolCall, ctx: ToolContext): Promise<{ result: string; files?: Attachment[] }> {
   const def = getTools(ctx)[call.name];
   if (!def) throw new Error(`Unknown or unavailable tool "${call.name}"`);
-  const out: any = await def.run(ctx, call.args);
+  const kind: TaskKind = call.name === 'laptop.run' ? 'command' : (def.service !== 'laptop' && TASK_KINDS[def.service]) || 'tool';
+  let title = call.name;
+  try {
+    title = def.label(call.args);
+  } catch {}
+  const out: any = await withTask({ kind, title, conversationId: ctx.conversationId }, async (taskId) => {
+    const value: any = await def.run({ ...ctx, taskId }, call.args);
+    if (kind !== 'command') {
+      const text = typeof value === 'string' ? value : value && typeof value === 'object' && value[FILES] ? value.text : JSON.stringify(value, null, 2);
+      appendTask(taskId, String(text ?? '').slice(0, 20_000));
+    }
+    return value;
+  });
   const files: Attachment[] | undefined = out && typeof out === 'object' && out[FILES] ? out.files : undefined;
   const value = files ? out.text : out;
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);

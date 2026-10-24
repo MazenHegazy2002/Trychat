@@ -15,6 +15,7 @@ import { listMcpTools } from './mcp';
 import { pluginAgents, pluginMcpServers, pluginSkills, slashCommands } from './plugins';
 import type { SlashCommand } from './plugins';
 import * as sync from './sync';
+import { endTask, startTask } from './tasks';
 import { formatToolResult, needsApproval, parseToolCall, runToolCall, stripToolTags } from './tools';
 import type { ToolContext } from './tools';
 import type { Account, Attachment, ChatMessage, Conversation, InstallItem, McpServer, McpTool, Memory, Plugin, Project, Settings, Skill } from './types';
@@ -56,7 +57,7 @@ interface Store {
   syncNow: () => Promise<void>;
   /** Pass a function to build the patch from the latest settings (safe across awaits). */
   updateSettings: (patch: Partial<Settings> | ((prev: Settings) => Partial<Settings>)) => Promise<void>;
-  createConversation: (projectId?: string) => Conversation;
+  createConversation: (projectId?: string, workspaceId?: string) => Conversation;
   /** Creates or updates a project. */
   saveProject: (project: Project) => void;
   /** Deletes a project; its chats move out of it (they are kept). */
@@ -208,8 +209,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /** Everything tools need, using the latest state. Plugin skills, servers and agents are merged in. */
   const toolCtx = useCallback(
-    (model: string): ToolContext => {
+    (model: string, conversationId?: string): ToolContext => {
       const base: ToolContext = {
+        conversationId,
+        workspaceId: conversationId ? convRef.current.find((c) => c.id === conversationId)?.workspaceId : undefined,
         settings: settingsRef.current,
         skills: [...skillsRef.current, ...pluginSkills(pluginsRef.current)],
         mcpServers: allMcpServers(),
@@ -490,13 +493,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await storage.saveSettings(next);
   }, []);
 
-  const createConversation = useCallback((projectId?: string) => {
+  const createConversation = useCallback((projectId?: string, workspaceId?: string) => {
     const now = Date.now();
     const conv: Conversation = {
       id: uid(),
       title: 'New chat',
       model: settingsRef.current.model,
       ...(projectId ? { projectId } : {}),
+      ...(workspaceId ? { workspaceId } : {}),
       messages: [],
       createdAt: now,
       updatedAt: now,
@@ -678,13 +682,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setBusy((b) => ({ ...b, [conversationId]: true }));
       const controller = new AbortController();
       controllers.current[conversationId] = controller;
+      const taskId = startTask({ kind: 'reply', title: `Reply in “${conv?.title || 'chat'}”`, conversationId, cancel: () => controller.abort() });
       let raw = '';
       try {
         raw = await chat({
           settings: s,
           model,
           messages: buildApiMessages(
-            toolCtx(model),
+            toolCtx(model, conversationId),
             memRef.current,
             history,
             await messageContent(history),
@@ -699,21 +704,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         if (!controller.signal.aborted) {
           setAssistant({ content: display(raw), error: e instanceof Error ? e.message : String(e) });
+          endTask(taskId, 'failed', { output: e instanceof Error ? e.message : String(e) });
           endBusy(conversationId);
           return;
         }
       }
       delete controllers.current[conversationId];
+      endTask(taskId, controller.signal.aborted ? 'cancelled' : 'done', { output: display(raw) });
       if (s.memoryEnabled) applyMemoryOps(raw);
 
-      const { call, before } = controller.signal.aborted ? { call: null, before: raw } : parseToolCall(raw, toolCtx(model));
+      const { call, before } = controller.signal.aborted ? { call: null, before: raw } : parseToolCall(raw, toolCtx(model, conversationId));
       if (!call) {
         setAssistant({ content: display(raw) });
         endBusy(conversationId);
         return;
       }
 
-      if (call.status === 'pending' && toolStepsSinceUser(history) < MAX_AUTO_TOOL_STEPS && !needsApproval(call, toolCtx(model))) {
+      if (call.status === 'pending' && toolStepsSinceUser(history) < MAX_AUTO_TOOL_STEPS && !needsApproval(call, toolCtx(model, conversationId))) {
         call.status = 'running';
       }
       const finished: ChatMessage = { ...assistant, content: display(before), toolCall: call };
@@ -748,7 +755,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       controllers.current[conversationId] = controller;
       try {
         const model = convRef.current.find((c) => c.id === conversationId)?.model || settingsRef.current.model;
-        const { result, files } = await runToolCall(call, { ...toolCtx(model), approval: { secrets: extra?.secrets } });
+        const { result, files } = await runToolCall(call, { ...toolCtx(model, conversationId), approval: { secrets: extra?.secrets } });
         call = { ...call, status: 'done', result, ...(files ? { files } : {}) };
         files?.forEach((f) => addToLibrary(f, conversationId).catch(() => {}));
       } catch (e) {

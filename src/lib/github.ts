@@ -58,7 +58,7 @@ async function ghRaw(s: GhSettings, path: string, init: GhInit = {}): Promise<{ 
   return { res, text };
 }
 
-async function gh<T = any>(s: GhSettings, path: string, init: GhInit = {}): Promise<T> {
+export async function gh<T = any>(s: GhSettings, path: string, init: GhInit = {}): Promise<T> {
   const { text } = await ghRaw(s, path, init);
   return (text ? JSON.parse(text) : null) as T;
 }

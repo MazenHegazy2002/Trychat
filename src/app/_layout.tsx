@@ -45,6 +45,9 @@ function Navigator() {
       <Stack.Screen name="plugins/[id]" options={{ title: '' }} />
       <Stack.Screen name="store" options={{ title: 'Store' }} />
       <Stack.Screen name="files" options={{ title: 'Files' }} />
+      <Stack.Screen name="tasks" options={{ title: 'Tasks' }} />
+      <Stack.Screen name="tasks/[id]" options={{ title: 'Task' }} />
+      <Stack.Screen name="terminal" options={{ title: 'Laptop terminal' }} />
       <Stack.Screen name="friends" options={{ title: 'Friends' }} />
       <Stack.Screen name="projects/index" options={{ title: 'Projects' }} />
       <Stack.Screen name="projects/[id]" options={{ title: '' }} />

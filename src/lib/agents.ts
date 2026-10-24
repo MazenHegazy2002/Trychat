@@ -2,6 +2,7 @@ import { chat } from './api';
 import type { ApiMessage } from './api';
 import { formatToolCall, formatToolResult, getTools, needsApproval, parseToolCall, runTool, toolInstructions } from './tools';
 import type { ToolContext } from './tools';
+import { appendTask, withTask } from './tasks';
 
 /**
  * Sub-agents: independent model runs started by the main assistant via `agents.run`.
@@ -75,7 +76,15 @@ async function runOne(ctx: ToolContext, defaultModel: string, { task, model, age
 }
 
 export async function runSubAgents(ctx: ToolContext, model: string, tasks: SubAgentTask[]): Promise<string> {
-  const results = await Promise.allSettled(tasks.map((t) => runOne(ctx, model, t)));
+  const results = await Promise.allSettled(
+    tasks.map((t) =>
+      withTask({ kind: 'subagent', title: `Sub-agent: ${t.task.slice(0, 100)}`, conversationId: ctx.conversationId }, async (id) => {
+        const answer = await runOne(ctx, model, t);
+        appendTask(id, answer);
+        return answer;
+      }),
+    ),
+  );
   return results
     .map((r, i) => {
       const who = tasks[i].agent ? ` (${tasks[i].agent})` : '';

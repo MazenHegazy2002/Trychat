@@ -225,7 +225,11 @@ function killTree(child, signal) {
   }
 }
 
-async function runCommand({ command, cwd }) {
+/** Streaming commands by the id the app gave them, so POST /run/kill can stop one. */
+const jobs = new Map();
+
+/** `hooks.onData(stream, text)` sees output as it arrives; `hooks.id` registers the command for /run/kill. */
+async function runCommand({ command, cwd }, hooks = {}) {
   if (typeof command !== 'string' || !command.trim()) throw httpError(400, '"command" is required');
   if (command.includes('\0')) throw httpError(400, '"command" must not contain NUL bytes');
   const { real: dir, rel } = await resolveInRoot(cwd);
@@ -252,6 +256,7 @@ async function runCommand({ command, cwd }) {
       finished = true;
       timers.forEach(clearTimeout);
       running.delete(child);
+      if (hooks.id) jobs.delete(hooks.id);
       child.stdout?.destroy();
       child.stderr?.destroy();
       if (error) return reject(httpError(500, `Could not start the command: ${error.message}`));
@@ -260,6 +265,7 @@ async function runCommand({ command, cwd }) {
         timedOut: stoppedFor === 'timeout',
         ...(stoppedFor === 'timeout' ? { timeoutMs: COMMAND_TIMEOUT_MS } : {}),
         ...(stoppedFor === 'output' ? { outputLimit: MAX_OUTPUT } : {}),
+        ...(stoppedFor === 'killed' ? { killed: true } : {}),
         stdout: stdout.text(),
         stderr: stderr.text(),
         stdoutBytes: stdout.bytes,
@@ -276,9 +282,17 @@ async function runCommand({ command, cwd }) {
       timers.push(setTimeout(() => finish({ exitCode: null, signal: 'SIGKILL' }), KILL_GRACE_MS + 2_000));
     };
     timers.push(setTimeout(() => stop('timeout'), COMMAND_TIMEOUT_MS));
+    if (hooks.id) jobs.set(hooks.id, () => stop('killed'));
+    hooks.onStart?.(stop);
 
+    const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() };
     const collect = (sink) => (chunk) => {
       sink.add(chunk);
+      if (hooks.onData) {
+        const name = sink === stdout ? 'stdout' : 'stderr';
+        const text = decoders[name].decode(chunk, { stream: true });
+        if (text) hooks.onData(name, text);
+      }
       if (stdout.bytes + stderr.bytes > MAX_OUTPUT) stop('output');
     };
     child.stdout.on('data', collect(stdout));
@@ -407,8 +421,66 @@ const routes = {
     return { path: rel, bytes: Buffer.byteLength(content) };
   },
 
-  'POST /run': runCommand,
+  'POST /run': (body) => runCommand(body),
+
+  // {id} — stops a command started with /run/stream (and everything it started).
+  'POST /run/kill': async ({ id }) => {
+    const stop = jobs.get(String(id ?? ''));
+    if (stop) stop();
+    return { killed: !!stop };
+  },
 };
+
+/**
+ * POST /run/stream {command, cwd?, id?}: like /run, but answers at once with newline-delimited JSON:
+ * {"type":"start","id"}, then {"type":"stdout"|"stderr","data"} as output arrives, then
+ * {"type":"exit", ...the /run result without stdout/stderr}. Closing the connection stops the command.
+ */
+async function runStream(req, res) {
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    const [status, error] = describeError(e);
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ error }));
+  }
+  const id = typeof body.id === 'string' && body.id ? body.id.slice(0, 100) : randomBytes(8).toString('hex');
+  let started = false;
+  let stopFn = null;
+  const line = (obj) => res.write(JSON.stringify(obj) + '\n');
+  const begin = () => {
+    if (started) return;
+    started = true;
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+    line({ type: 'start', id });
+  };
+  res.on('close', () => {
+    if (!res.writableFinished) stopFn?.('killed');
+  });
+  try {
+    const result = await runCommand(body, {
+      id,
+      onStart: (stop) => {
+        stopFn = stop;
+        begin();
+      },
+      onData: (stream, data) => line({ type: stream, data }),
+    });
+    begin();
+    const { stdout, stderr, ...rest } = result;
+    line({ type: 'exit', ...rest });
+    res.end();
+  } catch (e) {
+    const [status, error] = describeError(e);
+    if (started) {
+      line({ type: 'error', status, error });
+      return res.end();
+    }
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error }));
+  }
+}
 
 /** Status and message for an error, without exposing internals. */
 function describeError(e) {
@@ -450,7 +522,9 @@ const server = http.createServer(async (req, res) => {
 
   if (!authorized(req.headers.authorization)) return send(401, { error: 'Wrong pairing code' });
 
-  const route = routes[`${req.method} ${(req.url ?? '/').split('?')[0]}`];
+  const key = `${req.method} ${(req.url ?? '/').split('?')[0]}`;
+  if (key === 'POST /run/stream') return runStream(req, res);
+  const route = routes[key];
   if (!route) return send(404, { error: 'Not found' });
   try {
     send(200, await route(req.method === 'POST' ? await readBody(req) : {}));

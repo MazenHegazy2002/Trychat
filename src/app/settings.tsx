@@ -133,6 +133,8 @@ export default function SettingsScreen() {
               : 'Add tools from MCP servers',
           ],
           ['/store', 'Store', 'Browse plugins, skills and MCP servers'],
+          ['/tasks', 'Tasks & terminal', 'Running and recent replies, tools and laptop commands'],
+          ['/workspaces', 'Workspaces', 'Edit GitHub repos and folders; let the assistant work in them'],
           ['/files', 'Files', 'Everything sent, received and shared in chats'],
           ['/friends', 'Friends', 'Share files with friends who have an account'],
           [

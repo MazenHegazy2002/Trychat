@@ -42,6 +42,7 @@ export function ToolCallCard({ call, onApprove, onDeny }: Props) {
       friends: 'Friends',
       store: 'Store',
       web: 'Web',
+      workspace: 'Workspace',
       skills: 'Skill',
       mcp: call.name.split('.')[1] ?? 'MCP',
     }[service ?? 'code'] ?? 'Tool';
