@@ -1,0 +1,8 @@
+appId: com.trychat.app
+name: Memory
+---
+- launchApp
+- extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "memory" } }
+- extendedWaitUntil: { visible: "Memory", timeout: 15000 }
+- takeScreenshot: memory

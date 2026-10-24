@@ -1,0 +1,5 @@
+flows:
+  - "flows/*"
+executionOrder:
+  continueOnFailure: true
+  flowsOrder: [01_launch, 02_settings, 03_chat]

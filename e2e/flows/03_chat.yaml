@@ -1,0 +1,24 @@
+appId: com.trychat.app
+name: Chat composer, attach sheet, slash menu
+---
+- launchApp
+- extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
+- tapOn: ".*New chat"
+- extendedWaitUntil: { visible: "How can I help you today?", timeout: 15000 }
+- takeScreenshot: 03_chat_empty
+- tapOn: "How can I help you today?"
+- inputText: "Hello from Maestro"
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 03_composer_keyboard   # check: composer sits above the keyboard
+- assertVisible: "Hello from Maestro"
+- hideKeyboard
+- tapOn: { label: "Attach photos or files" }
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 03_attach_sheet
+- tapOn: { label: "Close", optional: true }
+- tapOn: "Hello from Maestro"
+- eraseText: 40
+- inputText: "/"
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 03_slash_menu
+- hideKeyboard

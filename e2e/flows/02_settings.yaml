@@ -1,0 +1,47 @@
+appId: com.trychat.app
+name: Settings and every row
+---
+- launchApp
+- extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
+- tapOn: { text: "Settings", index: 0 }
+- extendedWaitUntil: { visible: "Connections", timeout: 15000 }
+- takeScreenshot: 02_settings
+- tapOn: { point: "50%,15%" }   # account card at the top of Settings
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 02_row_account
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "settings" } }
+- scrollUntilVisible: { element: { text: "GitHub & laptop" }, direction: DOWN, timeout: 15000 }
+- tapOn: { text: "GitHub & laptop", index: 0 }
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 02_row_connections
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "settings" } }
+- scrollUntilVisible: { element: { text: "Skills" }, direction: DOWN, timeout: 15000 }
+- tapOn: { text: "Skills", index: 0 }
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 02_row_skills
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "settings" } }
+- scrollUntilVisible: { element: { text: "MCP servers" }, direction: DOWN, timeout: 15000 }
+- tapOn: { text: "MCP servers", index: 0 }
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 02_row_mcp
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "settings" } }
+- scrollUntilVisible: { element: { text: "Store" }, direction: DOWN, timeout: 15000 }
+- tapOn: { text: "Store", index: 0 }
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 02_row_store
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "settings" } }
+- scrollUntilVisible: { element: { text: "Files" }, direction: DOWN, timeout: 15000 }
+- tapOn: { text: "Files", index: 0 }
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 02_row_files
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "settings" } }
+- scrollUntilVisible: { element: { text: "Friends" }, direction: DOWN, timeout: 15000 }
+- tapOn: { text: "Friends", index: 0 }
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 02_row_friends
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "settings" } }
+- scrollUntilVisible: { element: { text: "Plugins" }, direction: DOWN, timeout: 15000 }
+- tapOn: { text: "Plugins", index: 0 }
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: 02_row_plugins
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "settings" } }

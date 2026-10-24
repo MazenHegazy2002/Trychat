@@ -1,0 +1,8 @@
+appId: com.trychat.app
+name: Files
+---
+- launchApp
+- extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "files" } }
+- extendedWaitUntil: { visible: "Files", timeout: 15000 }
+- takeScreenshot: files

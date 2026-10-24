@@ -1,0 +1,79 @@
+name: E2E Android (emulator + Maestro)
+
+# Builds an x86_64 release APK (debug-signed), runs the Maestro flows in e2e/ on Android emulators,
+# and uploads screenshots, a screen recording, Maestro reports and logcat as artifacts.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ccr-3c4f8ca3-5fdilw]
+    paths-ignore: ['**.md', 'bridge/**', 'server/**', 'desktop/**']
+
+concurrency:
+  group: e2e-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [34, 35]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - run: npm ci
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+        env:
+          EXPO_NO_TELEMETRY: 1
+
+      - name: Build x86_64 release APK
+        working-directory: android
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon
+
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Run Maestro on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          # Each line runs in its own shell; e2e/run-android.sh holds the logic.
+          script: bash e2e/run-android.sh
+
+      - name: Crash summary
+        if: always()
+        run: grep -nE -A30 "FATAL EXCEPTION" e2e-out/logcat.txt | head -100 || echo "No FATAL EXCEPTION in logcat."
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-android-${{ github.run_number }}-api${{ matrix.api-level }}
+          path: e2e-out/
+          if-no-files-found: warn

@@ -1,0 +1,18 @@
+appId: com.trychat.app
+name: New project
+---
+- launchApp
+- extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "projects/new" } }
+- extendedWaitUntil: { visible: "New project", timeout: 15000 }
+- takeScreenshot: projects_new
+- tapOn: "e.g. Spanish"
+- inputText: "Maestro project"
+- hideKeyboard
+- scrollUntilVisible: { element: { text: "Create project" }, direction: DOWN, timeout: 10000 }
+- tapOn: "Create project"
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: projects_created
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "projects" } }
+- assertVisible: "Maestro project"
+- takeScreenshot: projects_list

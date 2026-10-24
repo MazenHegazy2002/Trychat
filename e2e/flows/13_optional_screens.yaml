@@ -1,0 +1,25 @@
+appId: com.trychat.app
+name: Optional screens (Workspaces, Tasks, Terminal, Designs)
+---
+- launchApp
+- extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "workspaces" } }
+- runFlow:
+    when: { notVisible: ".*Unmatched.*" }
+    commands:
+      - takeScreenshot: optional_workspaces
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "tasks" } }
+- runFlow:
+    when: { notVisible: ".*Unmatched.*" }
+    commands:
+      - takeScreenshot: optional_tasks
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "terminal" } }
+- runFlow:
+    when: { notVisible: ".*Unmatched.*" }
+    commands:
+      - takeScreenshot: optional_terminal
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "designs" } }
+- runFlow:
+    when: { notVisible: ".*Unmatched.*" }
+    commands:
+      - takeScreenshot: optional_designs

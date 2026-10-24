@@ -1,0 +1,8 @@
+appId: com.trychat.app
+name: Account
+---
+- launchApp
+- extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "account" } }
+- extendedWaitUntil: { visible: "Account", timeout: 15000 }
+- takeScreenshot: account

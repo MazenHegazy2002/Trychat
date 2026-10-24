@@ -1,0 +1,99 @@
+name: E2E iOS (simulator + Maestro)
+
+# Builds TryChat for the iOS Simulator (no signing), boots an iPhone simulator, runs the Maestro
+# flows in e2e/, and uploads screenshots, a screen recording, Maestro reports and the system log.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ccr-3c4f8ca3-5fdilw]
+    paths-ignore: ['**.md', 'bridge/**', 'server/**', 'desktop/**']
+
+concurrency:
+  group: e2e-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Use the newest Xcode
+        run: |
+          X=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$X"
+          xcodebuild -version
+
+      - run: npm ci
+
+      - name: Generate the iOS project
+        run: npx expo prebuild --platform ios --no-install
+        env:
+          EXPO_NO_TELEMETRY: 1
+
+      - name: Install pods
+        working-directory: ios
+        run: pod install
+
+      - name: Build for the iOS Simulator (Release, no signing)
+        working-directory: ios
+        run: |
+          WS=$(ls -d *.xcworkspace | head -1)
+          SCHEME=$(basename "$WS" .xcworkspace)
+          xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            build > build.log 2>&1 || { grep -nE -A8 "error:|BUILD FAILED" build.log | head -160; tail -n 60 build.log; exit 1; }
+          APP=$(find build/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
+          [ -n "$APP" ] || { echo "No .app was built"; exit 1; }
+          echo "APP_PATH=$PWD/$APP" >> "$GITHUB_ENV"
+
+      - name: Boot an iPhone simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=[(r,x) for r,l in d.items() if "iOS" in r for x in l if x["name"].startswith("iPhone")]
+          c.sort(key=lambda t:t[0]); print(c[-1][1]["udid"])')
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP_PATH"
+
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Run Maestro flows
+        run: |
+          mkdir -p e2e-out/screenshots
+          xcrun simctl io "$UDID" recordVideo --codec h264 e2e-out/run.mp4 &
+          REC=$!
+          xcrun simctl spawn "$UDID" log stream --level error --predicate 'process == "TryChat"' > e2e-out/system.log 2>&1 &
+          LOG=$!
+          set +e
+          maestro --device "$UDID" test e2e/config.yaml --format junit --output e2e-out/report.xml \
+            --test-output-dir e2e-out/maestro --debug-output e2e-out/maestro-debug
+          STATUS=$?
+          kill -INT $REC; kill $LOG; sleep 5
+          find e2e-out/maestro . -maxdepth 3 -name '*.png' -not -path './e2e-out/screenshots/*' -exec cp {} e2e-out/screenshots/ \; 2>/dev/null
+          # Crash check: a crash report for TryChat, or the app no longer running.
+          if ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i trychat; then
+            cp ~/Library/Logs/DiagnosticReports/*TryChat* e2e-out/ 2>/dev/null; echo "::error::TryChat crashed"; exit 1
+          fi
+          xcrun simctl spawn "$UDID" launchctl list | grep -q com.trychat.app || { echo "::error::TryChat is not running"; exit 1; }
+          exit $STATUS
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-ios-${{ github.run_number }}
+          path: e2e-out/
+          if-no-files-found: warn

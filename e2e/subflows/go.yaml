@@ -1,0 +1,6 @@
+# Opens a TryChat route by deep link (trychat:///<ROUTE>).
+appId: com.trychat.app
+---
+- openLink: trychat:///${ROUTE}
+- tapOn: { text: "Open", optional: true }   # iOS "Open in TryChat?" prompt
+- waitForAnimationToEnd: { timeout: 3000 }

@@ -1,0 +1,17 @@
+appId: com.trychat.app
+name: MCP servers
+---
+- launchApp
+- extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "mcp" } }
+- extendedWaitUntil: { visible: "MCP servers", timeout: 15000 }
+- takeScreenshot: mcp
+- scrollUntilVisible: { element: { text: "Add MCP server" }, direction: DOWN, timeout: 10000 }
+- tapOn: "Add MCP server"
+- waitForAnimationToEnd: { timeout: 3000 }
+- takeScreenshot: mcp_add_form
+- tapOn: "e.g. Docs search"
+- inputText: "CI test"
+- hideKeyboard
+- takeScreenshot: mcp_add_form_filled
+- tapOn: { text: "Cancel", optional: true }

@@ -1,0 +1,7 @@
+appId: com.trychat.app
+name: Launch
+---
+- launchApp: { clearState: true }
+- extendedWaitUntil: { visible: "Search chats", timeout: 90000 }
+- assertVisible: "TryChat"
+- takeScreenshot: 01_home

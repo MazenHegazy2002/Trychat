@@ -1,0 +1,14 @@
+appId: com.trychat.app
+name: Store
+---
+- launchApp
+- extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
+- runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "store" } }
+- extendedWaitUntil: { visible: "Store", timeout: 15000 }
+- takeScreenshot: store
+- tapOn: { text: "Skills", index: 0 }
+- takeScreenshot: store_tab_skills
+- tapOn: { text: "MCP servers", index: 0 }
+- takeScreenshot: store_tab_mcp
+- tapOn: { text: "Plugins", index: 0 }
+- takeScreenshot: store_tab_plugins
