@@ -92,7 +92,7 @@ export default function SkillsScreen() {
           ),
         }}
       />
-      <KeyboardAwareScrollView contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
         <ScreenIntro title="Your skills">Playbooks TryChat loads when a task matches. They sync with your account.</ScreenIntro>
 
         {skills.length > 0 ? (
@@ -192,7 +192,7 @@ export default function SkillsScreen() {
         )}
       </KeyboardAwareScrollView>
 
-      <Modal visible={!!found} animationType="slide" onRequestClose={() => setFound(null)}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={!!found} animationType="slide" onRequestClose={() => setFound(null)}>
         {found && (
           <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top + 12 }}>
             <View style={[styles.modalHeader, { paddingHorizontal: 20 }]}>
@@ -215,7 +215,7 @@ export default function SkillsScreen() {
                 ? `Found ${found.length} skills in this repo.`
                 : `No SKILL.md files here — pick the Markdown files you want to use as skills.`}
             </Text>
-            <FlatList
+            <FlatList keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
               data={found}
               keyExtractor={(c) => c.path}
               contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
@@ -258,13 +258,12 @@ export default function SkillsScreen() {
         )}
       </Modal>
 
-      <Modal visible={!!editing} animationType="slide" onRequestClose={() => setEditing(null)}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={!!editing} animationType="slide" onRequestClose={() => setEditing(null)}>
         {editing && (
           <KeyboardAwareScrollView
             style={{ backgroundColor: theme.bg }}
             contentContainerStyle={{ padding: 20, paddingTop: insets.top + 12, paddingBottom: 48 }}
-            keyboardShouldPersistTaps="handled"
-          >
+            keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
             <View style={styles.modalHeader}>
               <Pressable onPress={() => setEditing(null)} hitSlop={10} style={styles.headerBtn}>
                 <Text style={{ color: theme.muted, fontSize: 16 }}>Cancel</Text>

@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { listFriends, shareFile } from '../lib/social';
@@ -8,11 +8,12 @@ import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { Attachment, Friend } from '../lib/types';
 import { Icon, PillButton } from './ui';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 /** Bottom sheet to send files to one or more friends. */
 export function ShareToFriendSheet({ visible, files, onClose }: { visible: boolean; files: Attachment[]; onClose: () => void }) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
       {/* Mounted only while open, so every opening starts fresh. */}
       {visible && <SheetBody files={files} onClose={onClose} />}
     </Modal>
@@ -169,7 +170,8 @@ function SheetBody({ files, onClose }: { files: Attachment[]; onClose: () => voi
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+    // Keyboard height already covers the bottom inset, so subtract it to avoid a doubled gap.
+    <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={-insets.bottom} style={{ flex: 1 }}>
       <Pressable style={styles.scrim} onPress={sending ? undefined : onClose} accessibilityLabel="Close" />
       <View style={[styles.sheet, { backgroundColor: theme.bg, paddingBottom: insets.bottom + 12 }]}>
         <View style={[styles.grabber, { backgroundColor: theme.oat }]} />

@@ -19,7 +19,7 @@ export function MoveToProjectSheet({ conversationId, onClose }: { conversationId
   ];
 
   return (
-    <Modal visible={!!conv} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible={!!conv} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Close" />
       {conv && (
         <View style={[styles.sheet, { backgroundColor: theme.bg, paddingBottom: insets.bottom + 12 }]}>

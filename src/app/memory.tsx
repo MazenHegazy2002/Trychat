@@ -20,7 +20,7 @@ export default function MemoryScreen() {
           ? 'These facts are shared with the model in every chat. The model adds to them when you tell it something worth remembering — or add your own.'
           : 'Long-term memory is turned off in Settings, so these are not sent to the model.'}
       </Text>
-      <FlatList
+      <FlatList keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
         data={memories}
         keyExtractor={(m) => m.id}
         contentContainerStyle={{ paddingBottom: 100 }}

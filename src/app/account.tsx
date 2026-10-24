@@ -40,7 +40,7 @@ function SignedIn() {
   ];
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page}>
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <Stack.Screen options={{ title: 'Account' }} />
       <View style={{ alignItems: 'center', marginBottom: 24 }}>
         <View style={[styles.avatar, { backgroundColor: theme.oat }]}>
@@ -164,7 +164,7 @@ function SignInForm() {
   ];
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <Stack.Screen options={{ title: '' }} />
       <View style={{ alignItems: 'center' }}>
         <View style={[styles.mark, { backgroundColor: theme.accent }]}>

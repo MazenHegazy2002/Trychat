@@ -135,7 +135,7 @@ export default function ConnectionsScreen() {
   );
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <Text style={{ color: theme.muted, fontSize: 15, lineHeight: 21 }}>
         TryChat can read and change code on GitHub and run tasks on your laptop. You approve commands and changes before
         they happen.

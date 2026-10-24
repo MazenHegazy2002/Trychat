@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,7 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AttachSheet, MessageAttachments, PendingAttachments } from '../../components/Attachments';
@@ -67,7 +68,9 @@ export default function ChatScreen() {
   const [attaching, setAttaching] = useState(false);
   const [recording, setRecording] = useState(false);
   const [sendingVoice, setSendingVoice] = useState(false);
-  const keyboardVisible = useKeyboardState((k) => k.isVisible);
+  // Composer keeps a constant bottom inset; the avoiding view subtracts it while the keyboard is up
+  // (keyboard height already covers the nav bar), so nothing doubles and nothing jumps mid-animation.
+  const composerBottom = Math.max(insets.bottom, 10);
   const inputRef = useRef<TextInput>(null);
 
   if (!conv) {
@@ -213,7 +216,7 @@ export default function ChatScreen() {
   return (
     // Android draws edge-to-edge, so the window no longer shrinks for the keyboard:
     // keyboard-controller pads the screen by the keyboard's height on both platforms.
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.bg }} behavior="padding" automaticOffset>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.bg }} behavior="padding" automaticOffset keyboardVerticalOffset={-(composerBottom - 8)}>
       <Stack.Screen
         options={{
           headerTitle: () => (
@@ -301,7 +304,7 @@ export default function ChatScreen() {
         )}
       </View>
 
-      <View style={[styles.composerWrap, { paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 10) }]}>
+      <View style={[styles.composerWrap, { paddingBottom: composerBottom }]}>
         <View style={[styles.composer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <PendingAttachments items={pending} onRemove={(aid) => setPending((p) => p.filter((x) => x.id !== aid))} />
           <TextInput
@@ -311,6 +314,14 @@ export default function ChatScreen() {
             placeholder={conv.messages.length ? 'Reply to TryChat' : 'How can I help you today?'}
             placeholderTextColor={theme.faint}
             multiline
+            onKeyPress={(e) => {
+              // Desktop/web: Enter sends, Shift+Enter adds a newline. Phones keep Return = newline.
+              const ne = e.nativeEvent as { key: string; shiftKey?: boolean };
+              if (Platform.OS === 'web' && ne.key === 'Enter' && !ne.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
             style={[styles.input, { color: theme.text }]}
             accessibilityLabel="Message"
           />

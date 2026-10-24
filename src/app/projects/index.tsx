@@ -19,7 +19,7 @@ export default function ProjectsScreen() {
   const loose = [...conversations].filter((c) => !c.projectId).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }}>
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <Stack.Screen
         options={{
           headerRight: () => (

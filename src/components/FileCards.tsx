@@ -247,7 +247,7 @@ export function FileActionSheet({
     ...extra.map((x) => ({ label: x.label, icon: x.icon, destructive: x.destructive, run: () => x.onPress(file) })),
   ];
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Close" />
       <View style={[styles.sheet, { backgroundColor: theme.bg, paddingBottom: insets.bottom + 12 }]}>
         <View style={[styles.grabber, { backgroundColor: theme.oat }]} />
@@ -305,7 +305,7 @@ export function FileViewer({ file, onClose, onMore }: { file: Attachment | null;
   const folder = file.uri.slice(0, file.uri.lastIndexOf('/') + 1);
 
   return (
-    <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
       <View style={{ flex: 1, backgroundColor: dark ? '#000000' : theme.bg, paddingTop: insets.top }}>
         <View style={styles.viewerBar}>
           <Pressable onPress={onClose} style={styles.barBtn} accessibilityRole="button" accessibilityLabel="Close">

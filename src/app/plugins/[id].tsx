@@ -305,7 +305,7 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
   const hasSensitive = plugin.userConfig.some((f) => f.sensitive);
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <Stack.Screen
         options={{
           title: '',

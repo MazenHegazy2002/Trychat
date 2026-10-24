@@ -30,7 +30,7 @@ export function AttachSheet({
     ['files', 'paperclip', 'Files', 'PDFs, code, text, CSV and more'],
   ];
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Close" />
       <View style={[styles.sheet, { backgroundColor: theme.bg, paddingBottom: insets.bottom + 12 }]}>
         <View style={[styles.grabber, { backgroundColor: theme.oat }]} />
@@ -128,7 +128,7 @@ export function MessageAttachments({ items }: { items: Attachment[] }) {
       {files.map((a) => (
         <FileTile key={a.id} a={a} />
       ))}
-      <Modal visible={!!open} transparent animationType="fade" onRequestClose={() => setOpen(null)}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={!!open} transparent animationType="fade" onRequestClose={() => setOpen(null)}>
         <Pressable style={styles.viewer} onPress={() => setOpen(null)} accessibilityLabel="Close image">
           {open && <Image source={{ uri: displayUri(open.uri) }} style={{ width: '100%', height: '80%' }} resizeMode="contain" />}
         </Pressable>

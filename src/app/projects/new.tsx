@@ -46,7 +46,7 @@ export default function NewProjectScreen() {
   };
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }}>
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <Stack.Screen
         options={{
           title: 'New project',

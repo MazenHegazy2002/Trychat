@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { listModels } from '../lib/api';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 interface Props {
   visible: boolean;
@@ -36,8 +37,8 @@ export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
   const custom = query.trim() && !models.includes(query.trim()) ? query.trim() : '';
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} onShow={load} transparent>
-      <View style={styles.backdrop}>
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose} onShow={load} transparent statusBarTranslucent navigationBarTranslucent>
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={-insets.bottom} style={styles.backdrop}>
         <View style={[styles.sheet, { backgroundColor: theme.bg, paddingBottom: insets.bottom + 12 }]}>
           <View style={styles.header}>
             <Text style={[styles.title, { color: theme.text }]}>Choose a model</Text>
@@ -52,6 +53,14 @@ export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
             placeholderTextColor={theme.muted}
             autoCapitalize="none"
             autoCorrect={false}
+            returnKeyType="done"
+            onSubmitEditing={() => {
+              const q = query.trim();
+              if (q) {
+                onSelect(q);
+                onClose();
+              }
+            }}
             style={[styles.search, { backgroundColor: theme.surface, color: theme.text }]}
           />
           {loading && <ActivityIndicator style={{ margin: 16 }} color={theme.primary} />}
@@ -65,6 +74,7 @@ export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
             data={custom ? [custom, ...filtered] : filtered}
             keyExtractor={(m) => m}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             renderItem={({ item }) => (
               <Pressable
                 onPress={() => {
@@ -81,7 +91,7 @@ export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
             )}
           />
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

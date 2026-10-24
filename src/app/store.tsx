@@ -195,7 +195,7 @@ function PluginsTab({ browser }: { browser: MarketplaceBrowser }) {
   if (browser.open) return <MarketplacePage source={browser.open} browser={browser} />;
 
   return (
-    <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <ScreenIntro title="Plugin marketplaces">
         Catalogs of Claude Code plugins. Each plugin can add skills, slash commands, agents and MCP servers.
       </ScreenIntro>
@@ -307,7 +307,7 @@ function MarketplacePage({ source, browser }: { source: CatalogSource; browser: 
   const empty = !!market && market.entries.length === 0;
 
   return (
-    <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <Pressable onPress={close} style={styles.backRow} accessibilityRole="button">
         <Icon name="chevron-left" size={18} color={theme.primary} />
         <Text style={{ color: theme.primary, fontWeight: '600' }}>All marketplaces</Text>
@@ -419,7 +419,7 @@ function SkillsTab() {
 
   const q = query.trim().toLowerCase();
   return (
-    <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <ScreenIntro title="Skills">Add a single skill without installing a whole plugin.</ScreenIntro>
       <SearchBox value={query} onChange={setQuery} placeholder="Search skills" />
       {BUILTIN_SKILL_REPOS.map((src) => {
@@ -576,7 +576,7 @@ function McpTab() {
   };
 
   return (
-    <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <ScreenIntro title="MCP servers">
         From the official MCP Registry. Remote servers work on your phone; ones that run on a computer are marked.
       </ScreenIntro>
@@ -657,7 +657,7 @@ function ConfigureServer({
   const remote = server ? bestRemote(server) : undefined;
   const fields: RemoteField[] = remote ? remoteFields(remote) : [];
   return (
-    <Modal visible={!!server} animationType="slide" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible={!!server} animationType="slide" onRequestClose={onClose}>
       {server && <ConfigureBody key={server.name} fields={fields} title={displayName(server)} insetsTop={insets.top} onClose={onClose} onSubmit={onSubmit} theme={theme} />}
     </Modal>
   );
@@ -683,7 +683,7 @@ function ConfigureBody({
   );
   const missing = fields.filter((f) => f.required && !values[f.key]?.trim());
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingTop: insetsTop + 12 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingTop: insetsTop + 12 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <View style={styles.modalHeader}>
         <Pressable onPress={onClose} style={styles.headerBtn} accessibilityRole="button">
           <Text style={{ color: theme.muted, fontSize: 16 }}>Cancel</Text>

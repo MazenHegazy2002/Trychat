@@ -46,7 +46,7 @@ export default function FriendsScreen() {
 function SignedOut() {
   const theme = useTheme();
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page}>
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <ScreenIntro title="Friends">Send files to friends who have an account on your TryChat server.</ScreenIntro>
       <Card style={{ padding: 20, alignItems: 'center' }}>
         <IconTile name="users" size={44} />
@@ -202,6 +202,7 @@ function SignedIn({ account }: { account: Account }) {
       contentContainerStyle={styles.page}
       keyboardShouldPersistTaps="handled"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} colors={[theme.primary]} />}
+      keyboardDismissMode="interactive"
     >
       <ScreenIntro title="Friends">Send files to friends who have an account on {account.serverUrl.replace(/^https?:\/\//, '')}.</ScreenIntro>
       {!!error && <Text style={{ color: theme.danger, marginBottom: 8 }}>{error}</Text>}

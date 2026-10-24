@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useTheme } from '../lib/theme';
 
@@ -16,7 +17,7 @@ interface Props {
 /** Cross-platform replacement for the iOS-only Alert.prompt. */
 export function TextPrompt(props: Props) {
   return (
-    <Modal visible={props.visible} transparent animationType="fade" onRequestClose={props.onClose}>
+    <Modal visible={props.visible} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={props.onClose}>
       {/* Mounted only while open, so each opening starts from initialValue. */}
       {props.visible && <PromptBody {...props} />}
     </Modal>
@@ -33,7 +34,7 @@ function PromptBody({ title, initialValue = '', placeholder, multiline, onSubmit
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.backdrop}>
+    <KeyboardAvoidingView behavior="padding" style={styles.backdrop}>
       <View style={[styles.card, { backgroundColor: theme.bg }]}>
         <Text style={{ color: theme.text, fontSize: 17, fontWeight: '700', marginBottom: 12 }}>{title}</Text>
         <TextInput
@@ -44,6 +45,8 @@ function PromptBody({ title, initialValue = '', placeholder, multiline, onSubmit
           autoFocus
           multiline={multiline}
           onSubmitEditing={multiline ? undefined : submit}
+          returnKeyType={multiline ? 'default' : 'done'}
+          submitBehavior={multiline ? 'newline' : 'submit'}
           style={[
             styles.input,
             { backgroundColor: theme.surface, color: theme.text, minHeight: multiline ? 90 : undefined },

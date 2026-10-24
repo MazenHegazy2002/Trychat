@@ -47,7 +47,7 @@ export default function SettingsScreen() {
   const inputStyle = [styles.input, { backgroundColor: theme.surface, color: theme.text }];
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <Pressable
         onPress={() => router.push('/account')}
         style={[inputStyle, { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 }]}

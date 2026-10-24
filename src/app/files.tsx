@@ -88,7 +88,7 @@ export default function FilesScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <FlatList
+      <FlatList keyboardDismissMode="on-drag"
         data={shown}
         keyExtractor={(f) => f.id}
         contentContainerStyle={{ padding: 20, paddingBottom: 48 }}

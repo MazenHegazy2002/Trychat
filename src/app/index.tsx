@@ -98,7 +98,7 @@ export default function ConversationsScreen() {
         style={[styles.search, { backgroundColor: theme.surface, color: theme.text }]}
       />
 
-      <FlatList
+      <FlatList keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
         data={list}
         keyExtractor={(c) => c.id}
         contentContainerStyle={{ paddingBottom: 100 }}

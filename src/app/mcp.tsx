@@ -133,7 +133,7 @@ export default function McpScreen() {
     ]);
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <ScreenIntro title="Connect more tools">
         Add remote MCP servers and their tools show up in chat. You approve each call unless you turn that off.
       </ScreenIntro>

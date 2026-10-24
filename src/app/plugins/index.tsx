@@ -158,7 +158,7 @@ export default function PluginsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <KeyboardAwareScrollView contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
         <ScreenIntro title="Plugins">
           Add skills, commands, agents and tools in one install. Works with Claude Code plugins and marketplaces on GitHub.
         </ScreenIntro>
@@ -264,7 +264,7 @@ export default function PluginsScreen() {
       </KeyboardAwareScrollView>
 
       {/* Confirm a single plugin */}
-      <Modal visible={!!pending} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setPending(null)}>
+      <Modal visible={!!pending} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={() => setPending(null)}>
         <View style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable
             style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(20,20,19,0.45)' }]}
@@ -293,7 +293,7 @@ export default function PluginsScreen() {
       </Modal>
 
       {/* Browse a marketplace */}
-      <Modal visible={!!market} animationType="slide" onRequestClose={closeMarket}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={!!market} animationType="slide" onRequestClose={closeMarket}>
         {market && (
           <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top + 4 }}>
             <View style={styles.modalHeader}>
