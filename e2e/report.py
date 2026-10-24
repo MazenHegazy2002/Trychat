@@ -10,12 +10,13 @@ if os.path.exists(report):
         fail = case.find('failure')
         print(f"[{'FAIL' if fail is not None else 'ok'}] {case.get('name')}" + (f" -- {(fail.get('message') or fail.text or '').strip()[:300]}" if fail is not None else ''))
 
-probe = os.path.join(out, 'probe-hierarchy.csv')
-if os.path.exists(probe):
-    print('===== keyboard probe hierarchy (rows with text, hints, labels or bounds of inputs) =====')
-    for line in open(probe, encoding='utf-8', errors='replace'):
-        if any(k in line for k in ('text=', 'hintText=', 'accessibilityText=', 'EditText', 'TextField', 'TextView', 'resource-id')):
-            print(line.rstrip()[:400])
+for name in ('probe-launch-hierarchy.csv', 'probe-hierarchy.csv'):
+    probe = os.path.join(out, name)
+    if os.path.exists(probe):
+        print(f'===== {name} (rows with text, hints, labels or inputs) =====')
+        for line in open(probe, encoding='utf-8', errors='replace'):
+            if any(k in line for k in ('text=', 'hintText=', 'accessibilityText=', 'EditText', 'TextField', 'TextView', 'resource-id')):
+                print(line.rstrip()[:400])
 for name in ('probe-launch.txt', 'probe-ime.txt'):
     p = os.path.join(out, name)
     if os.path.exists(p):

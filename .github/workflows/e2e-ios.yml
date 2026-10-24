@@ -79,6 +79,11 @@ jobs:
           xcrun simctl spawn "$UDID" log stream --level error --predicate 'process == "TryChat"' > e2e-out/system.log 2>&1 &
           LOG=$!
           set +e
+          # Launch probe: what is on screen 25 s after a cold start, as pixels and as Maestro sees it.
+          xcrun simctl launch "$UDID" com.trychat.app; sleep 25
+          xcrun simctl io "$UDID" screenshot e2e-out/probe-launch.png
+          maestro --device "$UDID" hierarchy --compact > e2e-out/probe-launch-hierarchy.csv 2>/dev/null
+          xcrun simctl terminate "$UDID" com.trychat.app
           maestro --device "$UDID" test e2e --format junit --output e2e-out/report.xml \
             --test-output-dir e2e-out/maestro --debug-output e2e-out/maestro-debug
           STATUS=$?
