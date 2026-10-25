@@ -30,15 +30,19 @@ except ImportError:
 wanted = ('probe', '03_composer_keyboard', '03_chat_empty', '03_attach_sheet', '03_slash_menu', 'home', 'account', 'optional_designs')
 shots = sorted(set(glob.glob(os.path.join(out, '**', '*.png'), recursive=True)))
 failed_shown = 0
+seen = set()
 for path in shots:
     base = os.path.basename(path)
+    if base in seen:  # the same screenshot is copied into screenshots/ too
+        continue
+    seen.add(base)
     failed = '❌' in base
     if not (base.startswith(wanted) or failed) or (failed and failed_shown >= 4):
         continue
     failed_shown += failed
     img = Image.open(path).convert('RGB')
-    img.thumbnail((320, 720))
+    img.thumbnail((240, 540))
     buf = io.BytesIO()
-    img.save(buf, 'JPEG', quality=60)
+    img.save(buf, 'JPEG', quality=50)
     print(f'===== IMG {base} {img.size[0]}x{img.size[1]} =====')
     print(base64.b64encode(buf.getvalue()).decode())

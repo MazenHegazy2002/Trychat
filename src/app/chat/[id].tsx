@@ -14,12 +14,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AttachSheet, MessageAttachments, PendingAttachments } from '../../components/Attachments';
 import type { AttachSource } from '../../components/Attachments';
 import { FileCards } from '../../components/FileCards';
+import { KeyboardPadded } from '../../components/KeyboardPadded';
 import { Icon } from '../../components/ui';
 import { MONO, SlashMenu, isTypingSlashCommand } from '../../components/SlashMenu';
 import { pickFiles, pickImages, takePhoto, transcribeVoice, voiceAttachment } from '../../lib/attachments';
@@ -215,9 +215,9 @@ export default function ChatScreen() {
   };
 
   return (
-    // Android draws edge-to-edge, so the window no longer shrinks for the keyboard:
-    // keyboard-controller pads the screen by the keyboard's height on both platforms.
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.bg }} behavior="padding" automaticOffset keyboardVerticalOffset={-(composerBottom - 8)}>
+    // Android draws edge-to-edge, so the window no longer shrinks for the keyboard: the screen pads itself by the
+    // keyboard's height, keeping the composer 8pt above it.
+    <KeyboardPadded bottomInset={composerBottom - 8} style={{ backgroundColor: theme.bg }}>
       <Stack.Screen
         options={{
           headerTitle: () => (
@@ -398,7 +398,7 @@ export default function ChatScreen() {
         onSubmit={(t) => store.renameConversation(id, t)}
         onClose={() => setRenaming(false)}
       />
-    </KeyboardAvoidingView>
+    </KeyboardPadded>
   );
 }
 

@@ -1,10 +1,10 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View, useColorScheme } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HtmlView } from '../../components/HtmlView';
+import { KeyboardPadded } from '../../components/KeyboardPadded';
 import { TextPrompt } from '../../components/TextPrompt';
 import { Icon } from '../../components/ui';
 import { chat } from '../../lib/api';
@@ -182,7 +182,7 @@ export default function DesignCanvas() {
           ),
         }}
       />
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+      <KeyboardPadded bottomInset={Math.max(insets.bottom, 10) - 8}>
         <View style={{ flex: 1 }}>
           <HtmlView html={html} background={theme.surface2} onMessage={onMessage} />
           {!!busy && (
@@ -225,7 +225,7 @@ export default function DesignCanvas() {
             Tap a board to preview · long-press for more · pinch or scroll to zoom
           </Text>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardPadded>
       <TextPrompt
         visible={!!renaming}
         title={renaming === 'design' ? 'Rename design' : 'Rename board'}

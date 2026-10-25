@@ -1,9 +1,9 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 import { CodeView, codeFont } from '../../components/CodeView';
+import { KeyboardPadded } from '../../components/KeyboardPadded';
 import { useStore } from '../../lib/store';
 import { useTheme } from '../../lib/theme';
 import { titleOf, wsRead, wsWrite } from '../../lib/workspace/backends';
@@ -52,7 +52,7 @@ export default function WorkspaceFileScreen() {
   };
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: theme.bg }}>
+    <KeyboardPadded style={{ backgroundColor: theme.bg }}>
       <Stack.Screen
         options={{
           title: titleOf(path),
@@ -95,6 +95,6 @@ export default function WorkspaceFileScreen() {
       ) : (
         <CodeView text={text} path={path} />
       )}
-    </KeyboardAvoidingView>
+    </KeyboardPadded>
   );
 }

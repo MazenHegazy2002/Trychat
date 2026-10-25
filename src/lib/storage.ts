@@ -90,15 +90,34 @@ function writeJson(key: string, value: unknown): Promise<void> {
   return AsyncStorage.setItem(key, JSON.stringify(value));
 }
 
+/**
+ * Secure-storage keys whose value couldn't be read (a keychain/keystore error). The app still starts, and a
+ * blank value is never written over them, so a key that is there but unreadable right now isn't lost.
+ */
+const unreadableSecrets = new Set<string>();
+
+async function readSecure(key: string): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(key);
+  } catch (e) {
+    console.warn(`[storage] couldn't read ${key} from secure storage:`, e);
+    unreadableSecrets.add(key);
+    return null;
+  }
+}
+
 // SecureStore is native-only; fall back to AsyncStorage on web.
 async function readSecret(field: SecretField): Promise<string | null> {
   if (Platform.OS === 'web') return AsyncStorage.getItem(secretKey(field));
-  return SecureStore.getItemAsync(secretKey(field));
+  return readSecure(secretKey(field));
 }
 
 async function writeSecret(field: SecretField, value: string): Promise<void> {
   if (Platform.OS === 'web') return AsyncStorage.setItem(secretKey(field), value);
-  return SecureStore.setItemAsync(secretKey(field), value);
+  const key = secretKey(field);
+  if (!value && unreadableSecrets.has(key)) return;
+  await SecureStore.setItemAsync(key, value);
+  unreadableSecrets.delete(key);
 }
 
 export async function loadSettings(): Promise<Settings> {
@@ -551,7 +570,7 @@ export function resolveStorageIssue(key: string): Promise<void> {
 
 // The account (with its session token) goes in secure storage on native.
 export async function loadAccount(): Promise<Account | null> {
-  const raw = Platform.OS === 'web' ? await AsyncStorage.getItem(KEYS.account) : await SecureStore.getItemAsync(KEYS.account);
+  const raw = Platform.OS === 'web' ? await AsyncStorage.getItem(KEYS.account) : await readSecure(KEYS.account);
   try {
     return raw ? (JSON.parse(raw) as Account) : null;
   } catch {
