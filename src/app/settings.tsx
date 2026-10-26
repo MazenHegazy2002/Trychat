@@ -111,6 +111,9 @@ export default function SettingsScreen() {
       <Pressable
         onPress={() => router.push('/connections')}
         style={[inputStyle, { flexDirection: 'row', alignItems: 'center', marginTop: 8 }]}
+        accessibilityRole="button"
+        accessibilityLabel="GitHub & laptop"
+        accessibilityHint={`GitHub ${githubConnected(settings) ? 'connected' : 'not connected'}, laptop ${laptopConnected(settings) ? 'connected' : 'not connected'}`}
       >
         <View style={{ flex: 1 }}>
           <Text style={{ color: theme.text, fontSize: 15 }}>GitHub & laptop</Text>
@@ -151,6 +154,9 @@ export default function SettingsScreen() {
           key={href}
           onPress={() => router.push(href)}
           style={[inputStyle, { flexDirection: 'row', alignItems: 'center', marginTop: 8 }]}
+          accessibilityRole="button"
+          accessibilityLabel={title}
+          accessibilityHint={sub}
         >
           <View style={{ flex: 1 }}>
             <Text style={{ color: theme.text, fontSize: 15 }}>{title}</Text>

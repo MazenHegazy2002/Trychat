@@ -91,6 +91,7 @@ export function PillButton({
       onPress={onPress}
       disabled={disabled || loading}
       accessibilityRole="button"
+      accessibilityLabel={title}
       style={({ pressed }) => [
         styles.pill,
         primary

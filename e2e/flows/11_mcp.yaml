@@ -12,6 +12,6 @@ name: MCP servers
 - takeScreenshot: mcp_add_form
 - tapOn: "e.g. Docs search"
 - inputText: "CI test"
-- hideKeyboard
+- tapOn: { text: "Name", index: 0 }   # dismisses the keyboard (no hideKeyboard, see 03_chat)
 - takeScreenshot: mcp_add_form_filled
 - tapOn: { text: "Cancel", optional: true }

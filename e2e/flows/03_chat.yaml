@@ -4,21 +4,21 @@ name: Chat composer, attach sheet, slash menu
 - launchApp
 - extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
 - tapOn: ".*New chat"
-- extendedWaitUntil: { visible: "How can I help you today?", timeout: 15000 }
+- extendedWaitUntil: { visible: { id: "composer" }, timeout: 15000 }
 - takeScreenshot: 03_chat_empty
-- tapOn: "How can I help you today?"
+- tapOn: { id: "composer" }
 - inputText: "Hello from Maestro"
 - waitForAnimationToEnd: { timeout: 3000 }
 - takeScreenshot: 03_composer_keyboard   # check: composer sits above the keyboard
 - assertVisible: "Hello from Maestro"
-- hideKeyboard
-- tapOn: { label: "Attach photos or files" }
+# No hideKeyboard: on Android it presses Back (which can leave the chat), and iOS may refuse it.
+# The attach button sits above the keyboard, so tap it directly.
+- tapOn: { text: "Attach photos or files" }
 - waitForAnimationToEnd: { timeout: 3000 }
 - takeScreenshot: 03_attach_sheet
-- tapOn: { label: "Close", optional: true }
-- tapOn: "Hello from Maestro"
+- tapOn: { text: "Close", optional: true }
+- tapOn: { id: "composer" }
 - eraseText: 40
 - inputText: "/"
 - waitForAnimationToEnd: { timeout: 3000 }
 - takeScreenshot: 03_slash_menu
-- hideKeyboard

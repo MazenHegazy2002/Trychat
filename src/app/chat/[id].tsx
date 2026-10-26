@@ -328,6 +328,7 @@ export default function ChatScreen() {
             }}
             style={[styles.input, { color: theme.text }]}
             accessibilityLabel="Message"
+            testID="composer"
           />
           {recording ? (
             <VoiceRecorder onCancel={() => setRecording(false)} onSend={sendVoice} sending={sendingVoice} />

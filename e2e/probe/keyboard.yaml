@@ -5,7 +5,7 @@ name: Keyboard probe
 - launchApp
 - extendedWaitUntil: { visible: "Search chats", timeout: 60000 }
 - tapOn: ".*New chat"
-- extendedWaitUntil: { visible: "How can I help you today?", timeout: 15000 }
-- tapOn: "How can I help you today?"
+- extendedWaitUntil: { visible: { id: "composer" }, timeout: 15000 }
+- tapOn: { id: "composer" }
 - inputText: "Hello from Maestro"
 - waitForAnimationToEnd: { timeout: 3000 }
