@@ -13,5 +13,5 @@ name: New project
 - waitForAnimationToEnd: { timeout: 3000 }
 - takeScreenshot: projects_created
 - runFlow: { file: ../subflows/go.yaml, env: { ROUTE: "projects" } }
-- assertVisible: "Maestro project"
+- extendedWaitUntil: { visible: ".*Maestro project.*", timeout: 10000 }   # iOS reads a row's title and description as one label
 - takeScreenshot: projects_list

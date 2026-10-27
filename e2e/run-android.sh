@@ -4,6 +4,10 @@ set -u
 OUT=e2e-out; mkdir -p "$OUT/screenshots"
 adb install -r android/app/build/outputs/apk/release/app-release.apk
 adb logcat -c
+# The emulator's own launcher sometimes hangs under CI load ("Pixel Launcher isn't responding"); hide such
+# system dialogs so they don't cover the app.
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
 # Launch probe: what is in front of the app 25 s after a cold start (dialogs, ANRs, permission prompts).
 adb shell monkey -p com.trychat.app -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
 sleep 25
