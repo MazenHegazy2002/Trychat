@@ -1,12 +1,13 @@
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
-import { memo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { TextStyle } from 'react-native';
 
-import { isPreviewable, previewVerb, setPreview } from '../lib/preview';
+import { isPreviewable, isVisual, previewVerb, setPreview, toHtmlDocument } from '../lib/preview';
 import { useTheme } from '../lib/theme';
 import type { Theme } from '../lib/theme';
+import { HtmlView } from './HtmlView';
 
 type Block =
   | { type: 'code'; lang: string; code: string; closed: boolean }
@@ -126,7 +127,24 @@ function Inline({ text, style, theme }: { text: string; style?: TextStyle; theme
   );
 }
 
+/** A finished page, app, game, SVG or diagram, running in the chat. */
+function LivePreview({ code, lang }: { code: string; lang: string }) {
+  const html = useMemo(() => toHtmlDocument(code, lang), [code, lang]);
+  return (
+    <View style={styles.live}>
+      <HtmlView html={html} />
+    </View>
+  );
+}
+
+/**
+ * Code stays folded until you tap View code: a finished page or app runs right here instead, and other code
+ * keeps its Run/Preview button. One- or two-line snippets (a command, a name) are shown as they are.
+ */
 function CodeBlock({ lang, code, closed, theme }: { lang: string; code: string; closed: boolean; theme: Theme }) {
+  const lines = code ? code.split('\n').length : 0;
+  const short = closed && lines <= 2;
+  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     await Clipboard.setStringAsync(code);
@@ -137,26 +155,43 @@ function CodeBlock({ lang, code, closed, theme }: { lang: string; code: string; 
     setPreview(code, lang);
     router.push('/preview');
   };
+  const live = closed && isVisual(lang);
+  const shown = short || open;
+  const summary = !closed
+    ? `Writing ${lang || 'code'}… ${lines} line${lines === 1 ? '' : 's'}`
+    : `${lang || 'code'} · ${lines} line${lines === 1 ? '' : 's'}`;
   return (
-    <View style={[styles.code, { backgroundColor: theme.codeBg }]}>
-      <View style={styles.codeHeader}>
-        <Text style={styles.codeLang}>{lang || 'code'}</Text>
-        <View style={{ flexDirection: 'row', gap: 14 }}>
-          {closed && isPreviewable(lang) && (
-            <Pressable onPress={preview} hitSlop={8}>
-              <Text style={[styles.codeAction, { color: '#E3A07F' }]}>▶ {previewVerb(lang)}</Text>
-            </Pressable>
-          )}
-          <Pressable onPress={copy} hitSlop={8}>
-            <Text style={styles.codeAction}>{copied ? 'Copied ✓' : 'Copy'}</Text>
-          </Pressable>
+    <View style={{ gap: 6 }}>
+      {live && <LivePreview code={code} lang={lang} />}
+      <View style={[styles.code, { backgroundColor: theme.codeBg }]}>
+        <View style={styles.codeHeader}>
+          <Text style={styles.codeLang}>{short ? lang || 'code' : summary}</Text>
+          <View style={{ flexDirection: 'row', gap: 14 }}>
+            {closed && isPreviewable(lang) && (
+              <Pressable onPress={preview} hitSlop={8} accessibilityRole="button">
+                <Text style={[styles.codeAction, { color: '#E3A07F' }]}>{live ? '⤢ Full screen' : `▶ ${previewVerb(lang)}`}</Text>
+              </Pressable>
+            )}
+            {closed && !short && (
+              <Pressable onPress={() => setOpen((o) => !o)} hitSlop={8} accessibilityRole="button">
+                <Text style={styles.codeAction}>{open ? 'Hide code' : 'View code'}</Text>
+              </Pressable>
+            )}
+            {closed && (
+              <Pressable onPress={copy} hitSlop={8} accessibilityRole="button">
+                <Text style={styles.codeAction}>{copied ? 'Copied ✓' : 'Copy'}</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
+        {shown && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <Text selectable style={[styles.codeText, { color: theme.codeText }]}>
+              {code}
+            </Text>
+          </ScrollView>
+        )}
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <Text selectable style={[styles.codeText, { color: theme.codeText }]}>
-          {code}
-        </Text>
-      </ScrollView>
     </View>
   );
 }
@@ -212,6 +247,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
 
 const styles = StyleSheet.create({
   code: { borderRadius: 10, overflow: 'hidden' },
+  live: { height: 380, borderRadius: 10, overflow: 'hidden', backgroundColor: '#FFFFFF' },
   codeHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',

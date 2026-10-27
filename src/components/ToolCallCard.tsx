@@ -28,6 +28,7 @@ const STATUS_TEXT: Record<ToolCall['status'], string> = {
 export function ToolCallCard({ call, onApprove, onDeny }: Props) {
   const theme = useTheme();
   const [open, setOpen] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
   const service = toolService(call);
   // store.install has its own card: what it adds, the assistant's reason, and fields for keys.
   if (call.name === 'store.install') return <InstallCard call={call} onApprove={onApprove} onDeny={onDeny} />;
@@ -64,6 +65,10 @@ export function ToolCallCard({ call, onApprove, onDeny }: Props) {
           : service === 'mcp'
             ? JSON.stringify(call.args, null, 2)
             : null;
+
+  // A one- or two-line command is shown as is; longer code folds behind "View code".
+  const detailLines = detail?.split('\n').length ?? 0;
+  const shortDetail = detail !== null && detailLines <= 2 && detail.length <= 160;
 
   if (call.status !== 'pending') {
     return (
@@ -103,12 +108,19 @@ export function ToolCallCard({ call, onApprove, onDeny }: Props) {
     <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <Text style={{ color: theme.muted, fontSize: 13 }}>{where} · needs your OK</Text>
       <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600', marginTop: 4 }}>{label}</Text>
-      {detail !== null && (
+      {detail !== null && (shortDetail || showDetail) && (
         <ScrollView style={[styles.output, { backgroundColor: theme.codeBg }]} nestedScrollEnabled>
           <Text selectable style={[styles.mono, { color: theme.codeText }]}>
             {detail}
           </Text>
         </ScrollView>
+      )}
+      {detail !== null && !shortDetail && (
+        <Pressable onPress={() => setShowDetail((v) => !v)} hitSlop={8} style={{ marginTop: 8 }} accessibilityRole="button">
+          <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '600' }}>
+            {showDetail ? 'Hide code' : `View code (${detailLines} lines)`}
+          </Text>
+        </Pressable>
       )}
       <View style={styles.buttons}>
         <Pressable onPress={() => onApprove()} style={[styles.button, { backgroundColor: theme.text }]}>

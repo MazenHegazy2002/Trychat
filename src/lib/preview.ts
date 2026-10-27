@@ -27,6 +27,12 @@ export function isPreviewable(lang: string): boolean {
   return kindOf(lang) !== null;
 }
 
+/** Things you look at (pages, apps, games, SVG, diagrams): these run by themselves in the chat. */
+export function isVisual(lang: string): boolean {
+  const k = kindOf(lang);
+  return k === 'html' || k === 'svg' || k === 'react' || k === 'mermaid';
+}
+
 /** "Run" for code that prints output, "Preview" for things you look at. */
 export function previewVerb(lang: string): string {
   const k = kindOf(lang);

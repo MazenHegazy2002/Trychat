@@ -256,7 +256,7 @@ export default function ChatScreen() {
               {store.account ? `, ${store.account.user.name}` : ''}
             </Text>
             <Text style={{ color: theme.muted, textAlign: 'center', marginBottom: 20 }}>
-              Chat, ask for apps and games (tap ▶ Preview to run them), or tell me things to remember.
+              Chat, ask for apps and games (they run right here), or tell me things to remember.
             </Text>
             {[
               ...(githubConnected(store.settings) ? [TOOL_SUGGESTIONS[0]] : []),

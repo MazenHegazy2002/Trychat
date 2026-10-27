@@ -20,6 +20,9 @@ export function HtmlView({
       source={html !== undefined ? { html, baseUrl: 'https://localhost/' } : { uri: uri ?? 'about:blank' }}
       style={{ backgroundColor: background }}
       setSupportMultipleWindows={false}
+      domStorageEnabled
+      allowsInlineMediaPlayback
+      nestedScrollEnabled
       onMessage={(e: WebViewMessageEvent) => onMessage?.(e.nativeEvent.data)}
     />
   );
