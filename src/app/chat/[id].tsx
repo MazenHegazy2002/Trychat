@@ -451,7 +451,8 @@ const styles = StyleSheet.create({
   commandLabel: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
   composerWrap: { paddingHorizontal: 12, paddingTop: 6 },
   composer: { borderWidth: 1, borderRadius: 24, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 8 },
-  input: { maxHeight: 160, minHeight: 40, fontSize: 16, paddingHorizontal: 4, paddingVertical: 8 },
+  // The composer card already shows focus; drop the browser's focus rectangle on web/desktop.
+  input: { maxHeight: 160, minHeight: 40, fontSize: 16, paddingHorizontal: 4, paddingVertical: 8, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null) },
   composerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   roundBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   modelChip: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 40, maxWidth: 170, paddingHorizontal: 6 },

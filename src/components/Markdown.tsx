@@ -15,6 +15,7 @@ type Block =
   | { type: 'list'; ordered: boolean; items: string[] }
   | { type: 'quote'; text: string }
   | { type: 'rule' }
+  | { type: 'table'; head: string[]; rows: string[][] }
   | { type: 'paragraph'; text: string };
 
 /** Minimal Markdown parser covering what chat models typically produce. */
@@ -70,6 +71,19 @@ export function parseBlocks(src: string): Block[] {
         }
       }
       blocks.push({ type: 'list', ordered, items });
+      continue;
+    }
+    // A table: a header row, a |---|---| divider, then rows.
+    const cells = (l: string) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+    if (line.includes('|') && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[i + 1])) {
+      const head = cells(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+        rows.push(cells(lines[i]));
+        i++;
+      }
+      blocks.push({ type: 'table', head, rows });
       continue;
     }
     if (line.startsWith('>')) {
@@ -200,7 +214,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
   const theme = useTheme();
   const blocks = parseBlocks(text);
   return (
-    <View style={{ gap: 8 }}>
+    <View style={{ gap: 10 }}>
       {blocks.map((b, i) => {
         switch (b.type) {
           case 'code':
@@ -235,6 +249,22 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
                 <Inline text={b.text} theme={theme} style={{ color: theme.muted }} />
               </View>
             );
+          case 'table':
+            return (
+              <ScrollView key={i} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
+                <View style={[styles.table, { borderColor: theme.border, flexGrow: 1 }]}>
+                  {[b.head, ...b.rows].map((row, r) => (
+                    <View key={r} style={[styles.tableRow, { borderColor: theme.border }, r === 0 && { backgroundColor: theme.surface }]}>
+                      {b.head.map((_, c) => (
+                        <View key={c} style={styles.tableCell}>
+                          <Inline text={row[c] ?? ''} theme={theme} style={{ fontSize: 14, lineHeight: 20, fontWeight: r === 0 ? '600' : '400' }} />
+                        </View>
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+            );
           case 'rule':
             return <View key={i} style={{ height: 1, backgroundColor: theme.border, marginVertical: 4 }} />;
           default:
@@ -247,6 +277,9 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
 
 const styles = StyleSheet.create({
   code: { borderRadius: 10, overflow: 'hidden' },
+  table: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, overflow: 'hidden' },
+  tableRow: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth },
+  tableCell: { flex: 1, minWidth: 96, maxWidth: 220, paddingHorizontal: 10, paddingVertical: 8 },
   live: { height: 380, borderRadius: 10, overflow: 'hidden', backgroundColor: '#FFFFFF' },
   codeHeader: {
     flexDirection: 'row',

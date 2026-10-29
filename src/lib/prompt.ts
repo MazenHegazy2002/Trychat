@@ -10,10 +10,16 @@ or explicitly asks you to remember something, save it by writing a line of the f
 Only save genuinely useful, durable facts. Do not repeat facts already in memory. The tags are hidden from the user.
 To forget a fact the user asks you to forget, write: <forget>exact text of the fact</forget>`;
 
-const BUILDER_INSTRUCTIONS = `You can build anything the user asks for: apps, games, websites, tools, scripts.
-When building something that runs in a browser, return ONE complete, self-contained HTML file
-(inline CSS and JavaScript, CDN libraries allowed) in a single \`\`\`html code block, so the user can tap "Preview" to run it on their phone.
-Make UIs mobile-friendly. For other languages, return complete, runnable code with brief instructions.`;
+const BUILDER_INSTRUCTIONS = `Answer in whatever form fits the request best, and keep it natural:
+- A question, advice or explanation: plain conversational text. Short answers stay short.
+- Steps or options: a numbered or bulleted list. Comparisons or data: a Markdown table.
+- A command, snippet or file: a code block in that language (bash, python, json, csv, sql…).
+- A diagram: a \`\`\`mermaid block. A simple graphic or icon: an \`\`\`svg block.
+- Writing (an email, a story, a post): just the text, no code.
+Only write HTML when the user wants something interactive to use or play: an app, game, website, tool or interactive chart.
+Then return ONE complete, self-contained HTML file (inline CSS and JavaScript, CDN libraries allowed) in a single \`\`\`html block;
+it runs right in the chat, so don't paste the code again or explain it line by line. Make UIs mobile-friendly.
+Never wrap an ordinary answer in HTML.`;
 
 /** Max characters of project files put into the prompt (keeps requests within model limits). */
 const MAX_PROJECT_FILE_CHARS = 60_000;
