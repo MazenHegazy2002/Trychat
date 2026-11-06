@@ -70,3 +70,12 @@ jobs:
             Install on Android: open this page on your phone, download the APK, and allow
             "Install unknown apps" for your browser when asked.
             After installing: Settings → add your API key → Test connection → pick a model.
+
+      # Also publish to the public "latest" release, so anyone can download it without a GitHub login.
+      - name: Publish to the latest release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "TryChat (latest builds)" --notes "Newest Android, iPhone, Mac and Windows builds of TryChat." --prerelease --target "$GITHUB_SHA"
+          cp TryChat-*.apk TryChat.apk; gh release upload latest TryChat.apk --clobber

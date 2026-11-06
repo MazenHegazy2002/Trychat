@@ -13,6 +13,9 @@ on:
       - 'app.json'
       - '.github/workflows/windows-exe.yml'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -58,3 +61,12 @@ jobs:
           path: desktop/dist/*-arm64.exe
           compression-level: 0
           if-no-files-found: error
+
+      # Also publish to the public "latest" release, so anyone can download it without a GitHub login.
+      - name: Publish to the latest release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "TryChat (latest builds)" --notes "Newest Android, iPhone, Mac and Windows builds of TryChat." --prerelease --target "$GITHUB_SHA"
+          gh release upload latest desktop/dist/*.exe --clobber

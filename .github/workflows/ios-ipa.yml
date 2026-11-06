@@ -13,6 +13,9 @@ concurrency:
   group: ios-ipa-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-26
@@ -61,3 +64,12 @@ jobs:
           name: TryChat-ipa-${{ github.run_number }}
           path: TryChat-${{ github.run_number }}-unsigned.ipa
           if-no-files-found: error
+
+      # Also publish to the public "latest" release, so anyone can download it without a GitHub login.
+      - name: Publish to the latest release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "TryChat (latest builds)" --notes "Newest Android, iPhone, Mac and Windows builds of TryChat." --prerelease --target "$GITHUB_SHA"
+          cp TryChat-*-unsigned.ipa TryChat-iPhone-unsigned.ipa; gh release upload latest TryChat-iPhone-unsigned.ipa --clobber
