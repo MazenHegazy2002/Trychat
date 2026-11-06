@@ -1,6 +1,6 @@
 name: Claude launcher (Windows)
 
-# Builds ClaudeMyApi.exe: opens Claude Code connected to your own API server. No key is built in.
+# Builds ClaudeMyApi.exe: opens the Claude desktop app (or Claude Code) connected to your own API server. No key is built in.
 on:
   workflow_dispatch:
   push:

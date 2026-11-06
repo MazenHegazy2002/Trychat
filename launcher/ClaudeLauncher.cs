@@ -1,11 +1,13 @@
-// "Claude (my API)" for Windows: opens Claude Code connected to your own API server instead of Anthropic's.
-// The server address is built in; the key is asked for on first run and saved encrypted for this Windows user
+// "Claude (my API)" for Windows: opens the Claude desktop app in its third-party inference mode, connected to your
+// own API gateway (the documented registry policy under HKCU\SOFTWARE\Policies\Claude). --code opens Claude Code
+// instead. The server address is built in; the key is asked for on first run and kept encrypted for this Windows user
 // (DPAPI), never in this file. Run with --reset to enter a new key or address.
 using System;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Win32;
 
 class ClaudeLauncher
 {
@@ -47,19 +49,54 @@ class ClaudeLauncher
             Console.WriteLine("Saved (encrypted for this Windows user).");
         }
 
+        if (Array.IndexOf(args, "--code") < 0) return OpenDesktop(url, key);
+
         if (!HasClaude())
         {
             Console.WriteLine("Claude Code isn't installed yet. Installing it with Anthropic's official installer...");
             Run("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -Command \"irm https://claude.ai/install.ps1 | iex\"", null, null);
             string local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin");
             Environment.SetEnvironmentVariable("PATH", local + ";" + Environment.GetEnvironmentVariable("PATH"));
-            if (!HasClaude()) { Console.WriteLine("The install didn't finish. Install Claude Code from https://claude.com/claude-code and run this again."); Pause(); return 1; }
+            if (Array.IndexOf(args, "--code") < 0) return OpenDesktop(url, key);
+
+        if (!HasClaude()) { Console.WriteLine("The install didn't finish. Install Claude Code from https://claude.com/claude-code and run this again."); Pause(); return 1; }
         }
 
         Console.WriteLine("Opening Claude with " + url + " ...");
         int code = Run("cmd.exe", "/c claude", url, key);
         if (code != 0) Pause();
         return code;
+    }
+
+    /// <summary>Points the Claude desktop app at the gateway (third-party inference policy) and opens it.</summary>
+    static int OpenDesktop(string url, string key)
+    {
+        using (var k = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\Policies\Claude"))
+        {
+            k.SetValue("inferenceProvider", "gateway", RegistryValueKind.String);
+            k.SetValue("inferenceGatewayBaseUrl", url + "/v1", RegistryValueKind.String);
+            k.SetValue("inferenceGatewayApiKey", key, RegistryValueKind.String);
+        }
+        // A running Claude reads its policy only at launch, so close it first.
+        foreach (var p in Process.GetProcessesByName("claude")) { try { p.Kill(); p.WaitForExit(5000); } catch { } }
+
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string[] candidates = {
+            Path.Combine(local, "AnthropicClaude", "claude.exe"),
+            Path.Combine(local, "Programs", "Claude", "Claude.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Claude", "Claude.exe"),
+        };
+        foreach (var exe in candidates)
+        {
+            if (!File.Exists(exe)) continue;
+            Console.WriteLine("Opening Claude with " + url + " ...");
+            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
+            return 0;
+        }
+        Console.WriteLine("The Claude desktop app isn't installed. Opening the download page: install it, then run this again.");
+        Process.Start(new ProcessStartInfo("https://claude.ai/download") { UseShellExecute = true });
+        Pause();
+        return 1;
     }
 
     static bool HasClaude()
