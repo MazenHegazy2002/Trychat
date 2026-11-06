@@ -2,7 +2,7 @@
   "name": "trychat-desktop",
   "productName": "TryChat",
   "version": "1.0.0",
-  "description": "TryChat for Mac",
+  "description": "TryChat for Mac and Windows",
   "main": "main.js",
   "private": true,
   "author": "TryChat",
@@ -10,7 +10,8 @@
     "web": "cd .. && npx expo export --platform web --output-dir desktop/web",
     "start": "electron .",
     "dist:mac": "electron-builder --mac --universal",
-    "dist:linux-dir": "electron-builder --linux dir"
+    "dist:linux-dir": "electron-builder --linux dir",
+    "dist:win": "electron-builder --win nsis --x64 --arm64"
   },
   "devDependencies": {
     "electron": "44.7.0",
@@ -58,6 +59,20 @@
         "dir"
       ],
       "icon": "build/icon.png"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TryChat",
+      "artifactName": "TryChat-Setup-${version}-${arch}.exe"
     }
   }
 }
