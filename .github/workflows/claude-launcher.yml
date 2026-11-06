@@ -1,0 +1,37 @@
+name: Claude launcher (Windows)
+
+# Builds ClaudeMyApi.exe: opens Claude Code connected to your own API server. No key is built in.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, ccr-3c4f8ca3-5fdilw]
+    paths: ['launcher/**', '.github/workflows/claude-launcher.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile with the .NET Framework C# compiler
+        shell: pwsh
+        run: |
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          & $csc /nologo /target:exe /out:ClaudeMyApi.exe /reference:System.Security.dll launcher\ClaudeLauncher.cs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeMyApi
+          path: ClaudeMyApi.exe
+
+      - name: Publish to the latest release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "TryChat (latest builds)" --notes "Newest builds." --prerelease --target "$GITHUB_SHA"
+          gh release upload latest ClaudeMyApi.exe --clobber
