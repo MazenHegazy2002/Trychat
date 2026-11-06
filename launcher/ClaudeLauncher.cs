@@ -57,7 +57,6 @@ class ClaudeLauncher
             Run("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -Command \"irm https://claude.ai/install.ps1 | iex\"", null, null);
             string local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin");
             Environment.SetEnvironmentVariable("PATH", local + ";" + Environment.GetEnvironmentVariable("PATH"));
-            if (Array.IndexOf(args, "--code") < 0) return OpenDesktop(url, key);
 
         if (!HasClaude()) { Console.WriteLine("The install didn't finish. Install Claude Code from https://claude.com/claude-code and run this again."); Pause(); return 1; }
         }
