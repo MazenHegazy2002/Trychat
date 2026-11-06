@@ -44,8 +44,17 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npx electron-builder --win nsis --x64 --arm64 --publish never
 
+      # One download per kind of PC, so nobody downloads both installers.
       - uses: actions/upload-artifact@v4
         with:
-          name: TryChat-windows
-          path: desktop/dist/*.exe
+          name: TryChat-windows-x64
+          path: desktop/dist/*-x64.exe
+          compression-level: 0
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TryChat-windows-arm64
+          path: desktop/dist/*-arm64.exe
+          compression-level: 0
           if-no-files-found: error
