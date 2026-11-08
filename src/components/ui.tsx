@@ -50,7 +50,12 @@ export function ScreenIntro({ title, children }: { title: string; children?: Rea
 export function SectionLabel({ children, style }: { children: ReactNode; style?: StyleProp<TextStyle> }) {
   const theme = useTheme();
   return (
-    <Text style={[TYPE.overline, { color: theme.inkFaint, marginTop: 24, marginBottom: 8, marginHorizontal: 4 }, style]} accessibilityRole="header">
+    <Text
+      style={[TYPE.overline, { color: theme.inkFaint, marginTop: 24, marginBottom: 8, marginHorizontal: 4 }, style]}
+      accessibilityRole="header"
+      // Shown in capitals; screen readers and UI tests get the words as written.
+      accessibilityLabel={typeof children === 'string' ? children : undefined}
+    >
       {children}
     </Text>
   );
