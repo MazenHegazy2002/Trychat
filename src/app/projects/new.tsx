@@ -1,18 +1,20 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
-import { Icon, PillButton, SectionLabel } from '../../components/ui';
+import { FileTile, fileTypeLabel } from '../../components/FileCards';
+import { IconButton, PillButton, SectionLabel, TextField } from '../../components/ui';
 import { formatSize, pickFiles } from '../../lib/attachments';
 import { uid } from '../../lib/id';
 import { useStore } from '../../lib/store';
-import { useTheme } from '../../lib/theme';
+import { RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, useTheme } from '../../lib/theme';
 import type { Attachment } from '../../lib/types';
-import { Text, TextInput } from '../../components/Text';
+import { Text } from '../../components/Text';
 
 export default function NewProjectScreen() {
   const theme = useTheme();
+  const wide = useWindowDimensions().width >= WIDE_BREAKPOINT;
   /** Set when opened from "Move to project → New project": that chat goes into the new project. */
   const { moveChat } = useLocalSearchParams<{ moveChat?: string }>();
   const { saveProject, moveConversation } = useStore();
@@ -22,7 +24,6 @@ export default function NewProjectScreen() {
   const [files, setFiles] = useState<Attachment[]>([]);
   const [adding, setAdding] = useState(false);
 
-  const input = [styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }];
   const canCreate = !!name.trim();
 
   const create = () => {
@@ -47,69 +48,74 @@ export default function NewProjectScreen() {
   };
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
+    <KeyboardAwareScrollView
+      style={{ backgroundColor: theme.bg }}
+      contentContainerStyle={[styles.page, wide && styles.pageWide]}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+    >
       <Stack.Screen
         options={{
           title: 'New project',
           headerRight: () => (
-            <Pressable onPress={create} disabled={!canCreate} style={styles.headerBtn} accessibilityRole="button">
-              <Text style={{ color: canCreate ? theme.primary : theme.faint, fontWeight: '600', fontSize: 16 }}>Create</Text>
+            <Pressable
+              onPress={create}
+              disabled={!canCreate}
+              style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.headerBtn, (pressed || hovered) && canCreate && { backgroundColor: theme.fill }]}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canCreate }}
+            >
+              <Text style={[TYPE.callout, { color: canCreate ? theme.ink : theme.inkFaint, fontWeight: '600' }]}>Create</Text>
             </Pressable>
           ),
         }}
       />
 
-      <Text style={[styles.label, { color: theme.muted }]}>Name</Text>
-      <TextInput value={name} onChangeText={setName} placeholder="e.g. Spanish" placeholderTextColor={theme.faint} style={input} autoFocus />
-
-      <Text style={[styles.label, { color: theme.muted }]}>What is it for?</Text>
-      <TextInput
-        value={description}
-        onChangeText={setDescription}
-        placeholder="e.g. Practice and grammar notes"
-        placeholderTextColor={theme.faint}
-        style={input}
-      />
-
-      <Text style={[styles.label, { color: theme.muted }]}>Instructions</Text>
-      <TextInput
-        value={instructions}
-        onChangeText={setInstructions}
-        placeholder="e.g. Reply in simple Spanish first, then English. Correct my mistakes gently."
-        placeholderTextColor={theme.faint}
-        multiline
-        style={[input, { minHeight: 140, textAlignVertical: 'top' }]}
-      />
-      <Text style={{ color: theme.muted, fontSize: 12, marginTop: 6 }}>Applied to every chat in this project.</Text>
+      <View style={{ gap: 20 }}>
+        {/* The label stays plain text: tapping it dismisses the keyboard. */}
+        <TextField label="Name" value={name} onChangeText={setName} placeholder="e.g. Spanish" accessibilityLabel="Project name" autoFocus />
+        <TextField label="What is it for?" value={description} onChangeText={setDescription} placeholder="e.g. Practice and grammar notes" />
+        <TextField
+          label="Instructions"
+          value={instructions}
+          onChangeText={setInstructions}
+          placeholder="e.g. Reply in simple Spanish first, then English. Correct my mistakes gently."
+          multiline
+          hint="Applied to every chat in this project."
+          inputStyle={{ minHeight: 140 }}
+        />
+      </View>
 
       <SectionLabel>Files</SectionLabel>
-      {files.map((f) => (
-        <View key={f.id} style={[styles.fileRow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <Icon name={f.text !== undefined ? 'file-text' : 'file'} size={16} color={theme.text} />
-          <Text style={{ color: theme.text, flex: 1 }} numberOfLines={1}>
-            {f.name}
-          </Text>
-          <Text style={{ color: theme.faint, fontSize: 12 }}>{formatSize(f.size)}</Text>
-          <Pressable onPress={() => setFiles((list) => list.filter((x) => x.id !== f.id))} style={styles.headerBtn} accessibilityLabel={`Remove ${f.name}`}>
-            <Icon name="x" size={16} />
-          </Pressable>
-        </View>
-      ))}
-      <Pressable onPress={addFiles} disabled={adding} style={[styles.drop, { borderColor: theme.oat }]} accessibilityRole="button">
-        {adding ? <ActivityIndicator color={theme.muted} /> : <Icon name="paperclip" size={18} />}
-        <Text style={{ color: theme.muted, fontSize: 14 }}>Add files — text, code, CSV, Markdown</Text>
-      </Pressable>
-      <Text style={{ color: theme.muted, fontSize: 12, marginTop: 6 }}>TryChat reads these in every chat here.</Text>
+      <View style={{ gap: 8 }}>
+        {files.map((f) => (
+          <View key={f.id} style={[styles.file, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <FileTile file={f} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[TYPE.callout, { color: theme.ink, fontWeight: '500' }]} numberOfLines={1}>
+                {f.name}
+              </Text>
+              <Text style={[TYPE.codeLabel, { color: theme.inkFaint, marginTop: 2 }]} numberOfLines={1}>
+                {fileTypeLabel(f)} · {formatSize(f.size)}
+              </Text>
+            </View>
+            <IconButton name="x" label={`Remove ${f.name}`} onPress={() => setFiles((list) => list.filter((x) => x.id !== f.id))} />
+          </View>
+        ))}
+      </View>
+      <PillButton title="Add files" icon="paperclip" variant="secondary" onPress={addFiles} loading={adding} style={{ marginTop: files.length ? 12 : 0 }} />
+      <Text style={[TYPE.caption, { color: theme.inkFaint, marginTop: 8, marginHorizontal: 4 }]}>
+        Text, code, CSV and Markdown. TryChat reads these in every chat here.
+      </Text>
 
-      <PillButton title="Create project" onPress={create} disabled={!canCreate} style={{ marginTop: 28 }} />
+      <PillButton title="Create project" size="lg" onPress={create} disabled={!canCreate} style={{ marginTop: 32 }} />
     </KeyboardAwareScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  headerBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  label: { fontSize: 13, marginTop: 16, marginBottom: 6 },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 48 },
-  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, paddingLeft: 14, marginBottom: 8 },
-  drop: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1.5, borderStyle: 'dashed', borderRadius: 12, paddingHorizontal: 14, minHeight: 52 },
+  page: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 48 },
+  pageWide: { width: '100%', maxWidth: SIZE.contentMax, alignSelf: 'center', paddingHorizontal: 24, paddingTop: 28 },
+  headerBtn: { minWidth: 44, minHeight: 44, paddingHorizontal: 10, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center' },
+  file: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 12, paddingRight: 4, paddingVertical: 8, minHeight: 60, borderRadius: RADIUS.md, borderWidth: 1 },
 });

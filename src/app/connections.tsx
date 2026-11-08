@@ -1,22 +1,47 @@
 import * as Clipboard from 'expo-clipboard';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Fragment, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
+import { Text } from '../components/Text';
+import {
+  Banner,
+  Card,
+  Chip,
+  ClaySwitch,
+  Divider,
+  Icon,
+  IconButton,
+  IconTile,
+  PillButton,
+  SectionLabel,
+  StatusBadge,
+  TextAction,
+  TextField,
+} from '../components/ui';
+import type { IconName } from '../components/ui';
 import { useStore } from '../lib/store';
-import { useTheme } from '../lib/theme';
+import { FONT, RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, useTheme } from '../lib/theme';
 import { listUserRepos, normalizeRepo, repoInfo, type RepoInfo } from '../lib/github';
 import { appPhoneFolder, checkPhoneFolder, phoneFolderSupported, pickPhoneFolder } from '../lib/phoneTools';
 import { githubWhoAmI, laptopInfo, normalizeBridgeUrl } from '../lib/tools';
 import type { Settings } from '../lib/types';
-import { Text, TextInput } from '../components/Text';
 
 const BRIDGE_COMMAND = 'node bridge/trychat-bridge.mjs --root=~/Projects';
+
+const PERMISSIONS = [
+  ['confirmCommands', 'Ask before running commands', 'Every command on your laptop needs your OK'],
+  ['confirmWrites', 'Ask before writing files or committing', 'Review each file change, commit and new issue'],
+  ['confirmReads', 'Ask before reading', 'Off: TryChat can list and read files on its own'],
+] as const;
 
 type Status = { state: 'idle' | 'testing' | 'ok' | 'error'; text?: string };
 
 export default function ConnectionsScreen() {
   const theme = useTheme();
+  const { width } = useWindowDimensions();
+  const wide = width >= WIDE_BREAKPOINT;
   const { settings, updateSettings } = useStore();
   const [draft, setDraft] = useState<Settings>(settings);
   const [github, setGithub] = useState<Status>({ state: 'idle' });
@@ -109,138 +134,172 @@ export default function ConnectionsScreen() {
     }
   };
 
-  const input = [styles.input, { backgroundColor: theme.surface, color: theme.text }];
-  const label = (t: string) => <Text style={[styles.label, { color: theme.muted }]}>{t}</Text>;
+  const githubOn = !!draft.githubToken;
+  const laptopOn = !!draft.bridgeUrl && !!draft.bridgeToken;
+
+  const badge = (on: boolean, failed = false) => (
+    <StatusBadge tone={failed ? 'danger' : on ? 'success' : 'neutral'}>
+      {failed ? 'Failed' : on ? 'Connected' : 'Not connected'}
+    </StatusBadge>
+  );
+
+  const header = (icon: IconName, title: string, right?: ReactNode) => (
+    <View style={styles.cardHead}>
+      <IconTile name={icon} size={36} />
+      <Text style={[TYPE.headline, { color: theme.ink, flex: 1 }]} accessibilityRole="header">
+        {title}
+      </Text>
+      {right}
+    </View>
+  );
 
   const statusLine = (s: Status) =>
     s.state === 'testing' ? (
-      <ActivityIndicator style={{ marginTop: 10, alignSelf: 'flex-start' }} color={theme.primary} />
+      <View style={styles.testing}>
+        <ActivityIndicator color={theme.inkMuted} />
+        <Text style={[TYPE.caption, { color: theme.inkMuted }]}>Testing…</Text>
+      </View>
     ) : s.text ? (
-      <Text style={{ color: s.state === 'ok' ? theme.text : theme.danger, marginTop: 10 }}>
-        {s.state === 'ok' ? '✓ ' : ''}
-        {s.text}
-      </Text>
+      <Banner tone={s.state === 'ok' ? 'success' : 'danger'}>{s.text}</Banner>
     ) : null;
 
   const actions = (onTest: () => void, onDisconnect: () => void, connected: boolean) => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20, marginTop: 14 }}>
-      <Pressable onPress={onTest} disabled={!connected} style={[styles.button, { backgroundColor: connected ? theme.text : theme.border }]}>
-        <Text style={{ color: theme.bg, fontWeight: '700' }}>Test</Text>
-      </Pressable>
-      {connected && (
-        <Pressable onPress={onDisconnect} hitSlop={8}>
-          <Text style={{ color: theme.danger, fontWeight: '600' }}>Disconnect</Text>
-        </Pressable>
-      )}
+    <View style={styles.actions}>
+      <PillButton title="Test" variant="secondary" icon="activity" onPress={onTest} disabled={!connected} />
+      {connected && <PillButton title="Disconnect" variant="danger" onPress={onDisconnect} />}
     </View>
   );
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
-      <Text style={{ color: theme.muted, fontSize: 15, lineHeight: 21 }}>
+    <KeyboardAwareScrollView
+      style={{ backgroundColor: theme.bg }}
+      contentContainerStyle={[styles.page, { paddingHorizontal: wide ? 24 : 16, paddingTop: wide ? 24 : 16 }]}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+    >
+      <Text style={[TYPE.callout, { color: theme.inkMuted }]}>
         TryChat can read and change code on GitHub and run tasks on your laptop. You approve commands and changes before
         they happen.
       </Text>
 
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Text style={[styles.title, { color: theme.text }]}>GitHub</Text>
-        {label('Personal access token')}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <TextInput
-            value={draft.githubToken}
-            onChangeText={(v) => set('githubToken', v.trim())}
-            secureTextEntry={!showToken}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="ghp_… or github_pat_…"
-            placeholderTextColor={theme.muted}
-            style={[input, { flex: 1, backgroundColor: theme.bg }]}
-          />
-          <Pressable onPress={() => setShowToken((v) => !v)} hitSlop={8}>
-            <Text style={{ color: theme.primary, fontWeight: '600' }}>{showToken ? 'Hide' : 'Show'}</Text>
-          </Pressable>
-        </View>
-        <Text style={[styles.help, { color: theme.muted }]}>
-          Create one at github.com → Settings → Developer settings → Personal access tokens. Give it “Contents”, “Issues”
-          and “Pull requests” read & write access to the repos you want. Stored in secure storage.
-        </Text>
+      <Card style={styles.card}>
+        {header('github', 'GitHub', badge(githubOn, github.state === 'error'))}
+        <TextField
+          label="Personal access token"
+          hint="Create one at github.com → Settings → Developer settings → Personal access tokens. Give it “Contents”, “Issues” and “Pull requests” read & write access to the repos you want. Stored in secure storage."
+          value={draft.githubToken}
+          onChangeText={(v) => set('githubToken', v.trim())}
+          secureTextEntry={!showToken}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="ghp_… or github_pat_…"
+          mono
+          right={
+            <FieldAction
+              title={showToken ? 'Hide' : 'Show'}
+              label={showToken ? 'Hide token' : 'Show token'}
+              onPress={() => setShowToken((v) => !v)}
+            />
+          }
+        />
         {statusLine(github)}
         {actions(testGithub, () => {
           set('githubToken', '');
           setGithub({ state: 'idle' });
-        }, !!draft.githubToken)}
-      </View>
+        }, githubOn)}
+      </Card>
 
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Text style={[styles.title, { color: theme.text }]}>Repositories</Text>
-        <Text style={[styles.help, { color: theme.muted }]}>
+      <Card style={styles.card}>
+        {header('git-branch', 'Repositories')}
+        <Text style={[TYPE.caption, { color: theme.inkMuted }]}>
           The repos TryChat works in. It treats them as “my repo”, and with one pinned it’s used whenever you don’t name
           another. Give the token Contents, Issues and Pull requests access to them.
         </Text>
-        {draft.repos.map((repo) => (
-          <View key={repo} style={[styles.repoRow, { borderTopColor: theme.border }]}>
-            <Text style={[styles.mono, { color: theme.text, flex: 1, fontSize: 14 }]}>{repo}</Text>
-            <Pressable
-              onPress={() => set('repos', draft.repos.filter((r) => r !== repo))}
-              hitSlop={10}
-              accessibilityLabel={`Remove ${repo}`}
-            >
-              <Text style={{ color: theme.danger, fontSize: 16 }}>✕</Text>
-            </Pressable>
+        {draft.repos.length > 0 && (
+          <View>
+            {draft.repos.map((repo) => (
+              <Fragment key={repo}>
+                <Divider />
+                <View style={styles.repoRow}>
+                  <Text style={[styles.mono, { color: theme.ink, flex: 1 }]} numberOfLines={1}>
+                    {repo}
+                  </Text>
+                  <IconButton
+                    name="x"
+                    label={`Remove ${repo}`}
+                    onPress={() => set('repos', draft.repos.filter((r) => r !== repo))}
+                  />
+                </View>
+              </Fragment>
+            ))}
           </View>
-        ))}
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 12, alignItems: 'center' }}>
-          <TextInput
-            value={newRepo}
-            onChangeText={setNewRepo}
-            onSubmitEditing={addRepo}
-            placeholder="owner/repo or GitHub link"
-            placeholderTextColor={theme.muted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[input, { flex: 1, backgroundColor: theme.bg }]}
-          />
-          <Pressable onPress={addRepo} hitSlop={8}>
-            <Text style={{ color: theme.primary, fontWeight: '700' }}>Add</Text>
-          </Pressable>
-        </View>
-        {!!repoError && <Text style={{ color: theme.danger, marginTop: 8, fontSize: 13 }}>{repoError}</Text>}
+        )}
+        <TextField
+          value={newRepo}
+          onChangeText={(v) => {
+            setNewRepo(v);
+            if (repoError) setRepoError('');
+          }}
+          onSubmitEditing={addRepo}
+          placeholder="owner/repo or GitHub link"
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel="Repository to add"
+          error={repoError || undefined}
+          mono
+          right={<FieldAction title="Add" label="Add repository" onPress={addRepo} />}
+        />
         {!!draft.githubToken && browse.state === 'idle' && (
-          <Pressable onPress={() => loadRepos(1)} hitSlop={8} style={{ marginTop: 14 }}>
-            <Text style={{ color: theme.primary, fontWeight: '600' }}>Choose from your GitHub repos</Text>
-          </Pressable>
+          <View style={{ alignSelf: 'flex-start' }}>
+            <TextAction title="Choose from your GitHub repos" onPress={() => loadRepos(1)} />
+          </View>
         )}
-        {browse.repos.map((r) => {
-          const pinned = draft.repos.includes(r.full_name);
-          return (
-            <Pressable
-              key={r.full_name}
-              onPress={() => togglePin(r.full_name)}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: pinned }}
-              style={[styles.repoRow, { borderTopColor: theme.border }]}
-            >
-              <Text style={{ width: 24, color: theme.primary, fontSize: 16 }}>{pinned ? '✓' : ''}</Text>
-              <Text style={[styles.mono, { color: theme.text, flex: 1, fontSize: 13 }]} numberOfLines={1}>
-                {r.full_name}
-              </Text>
-              {r.private && <Text style={{ color: theme.muted, fontSize: 12 }}>private</Text>}
-            </Pressable>
-          );
-        })}
-        {browse.state === 'loading' && <ActivityIndicator style={{ marginTop: 10, alignSelf: 'flex-start' }} color={theme.primary} />}
-        {browse.state === 'error' && <Text style={{ color: theme.danger, marginTop: 10 }}>{browse.error}</Text>}
+        {browse.repos.length > 0 && (
+          <View>
+            {browse.repos.map((r) => {
+              const pinned = draft.repos.includes(r.full_name);
+              return (
+                <Pressable
+                  key={r.full_name}
+                  onPress={() => togglePin(r.full_name)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: pinned }}
+                  accessibilityLabel={r.full_name}
+                  style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                    styles.pickRow,
+                    { backgroundColor: pressed || hovered ? theme.fill : 'transparent' },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.check,
+                      { borderColor: pinned ? theme.accent : theme.borderStrong, backgroundColor: pinned ? theme.accent : 'transparent' },
+                    ]}
+                  >
+                    {pinned && <Icon name="check" size={14} color={theme.onAccent} />}
+                  </View>
+                  <Text style={[styles.mono, { color: theme.ink, flex: 1, fontSize: 13 }]} numberOfLines={1}>
+                    {r.full_name}
+                  </Text>
+                  {r.private && <Chip>private</Chip>}
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+        {browse.state === 'loading' && <ActivityIndicator style={{ alignSelf: 'flex-start' }} color={theme.inkMuted} />}
+        {browse.state === 'error' && <Banner tone="danger">{browse.error}</Banner>}
         {browse.state === 'ok' && browse.next && (
-          <Pressable onPress={() => loadRepos(browse.page + 1)} hitSlop={8} style={{ marginTop: 12 }}>
-            <Text style={{ color: theme.primary, fontWeight: '600' }}>Show more</Text>
-          </Pressable>
+          <View style={{ alignSelf: 'flex-start' }}>
+            <TextAction title="Show more" onPress={() => loadRepos(browse.page + 1)} />
+          </View>
         )}
-      </View>
+      </Card>
 
       {phoneFolderSupported() && (
-        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <Text style={[styles.title, { color: theme.text }]}>Phone folder</Text>
-          <Text style={[styles.help, { color: theme.muted }]}>
+        <Card style={styles.card}>
+          {header('smartphone', 'Phone folder', badge(!!folder, !!folder && phone.state === 'error'))}
+          <Text style={[TYPE.caption, { color: theme.inkMuted }]}>
             Share one folder on this phone with TryChat. It can list, search and read files there, and write files when you
             allow it — nothing outside the folder.
             {Platform.OS === 'ios'
@@ -248,35 +307,38 @@ export default function ConnectionsScreen() {
               : ''}
           </Text>
           {folder && (
-            <View style={[styles.repoRow, { borderTopColor: theme.border }]}>
-              <Text style={{ color: theme.text, fontSize: 15, flex: 1 }} numberOfLines={1}>
-                📁 {folder.name}
-                {folder.source === 'app' ? ' (Files app)' : ''}
-              </Text>
+            <View style={[styles.folderRow, { backgroundColor: theme.fill }]}>
+              <Icon name="folder" size={16} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[TYPE.callout, { color: theme.ink }]} numberOfLines={1}>
+                  {folder.name}
+                  {folder.source === 'app' ? ' (Files app)' : ''}
+                </Text>
+                {phone.state === 'ok' && !!phone.text && (
+                  <Text style={[TYPE.caption, { color: theme.inkMuted }]}>{phone.text}</Text>
+                )}
+              </View>
             </View>
           )}
-          {statusLine(phone)}
-          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 20, marginTop: 14 }}>
-            <Pressable onPress={choosePhoneFolder} style={[styles.button, { backgroundColor: theme.text }]}>
-              <Text style={{ color: theme.bg, fontWeight: '700' }}>{folder ? 'Change folder' : 'Choose folder'}</Text>
-            </Pressable>
+          {phone.state === 'error' && !!phone.text && <Banner tone="danger">{phone.text}</Banner>}
+          <View style={styles.actions}>
+            <PillButton
+              title={folder ? 'Change folder' : 'Choose folder'}
+              variant="secondary"
+              icon="folder"
+              onPress={choosePhoneFolder}
+            />
             {Platform.OS === 'ios' && folder?.source !== 'app' && (
-              <Pressable onPress={() => set('phoneFolder', appPhoneFolder())} hitSlop={8}>
-                <Text style={{ color: theme.primary, fontWeight: '600' }}>Use TryChat folder</Text>
-              </Pressable>
+              <TextAction title="Use TryChat folder" onPress={() => set('phoneFolder', appPhoneFolder())} />
             )}
-            {folder && (
-              <Pressable onPress={() => set('phoneFolder', null)} hitSlop={8}>
-                <Text style={{ color: theme.danger, fontWeight: '600' }}>Disconnect</Text>
-              </Pressable>
-            )}
+            {folder && <PillButton title="Disconnect" variant="danger" onPress={() => set('phoneFolder', null)} />}
           </View>
-        </View>
+        </Card>
       )}
 
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Text style={[styles.title, { color: theme.text }]}>Laptop</Text>
-        <Text style={[styles.help, { color: theme.muted, marginTop: 4 }]}>
+      <Card style={styles.card}>
+        {header('monitor', 'Laptop', badge(laptopOn, laptop.state === 'error'))}
+        <Text style={[TYPE.caption, { color: theme.inkMuted }]}>
           On your laptop, from this project’s folder, start the bridge (Node 18+). It prints the address and pairing code
           to enter here. Your phone and laptop must be on the same Wi-Fi.
         </Text>
@@ -286,13 +348,18 @@ export default function ConnectionsScreen() {
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
           }}
+          accessibilityRole="button"
+          accessibilityLabel={copied ? 'Copied' : 'Copy the bridge command'}
           style={[styles.command, { backgroundColor: theme.codeBg }]}
         >
-          <Text style={[styles.mono, { color: theme.codeText, flex: 1 }]}>{BRIDGE_COMMAND}</Text>
-          <Text style={{ color: theme.codeText, fontSize: 12, fontWeight: '600' }}>{copied ? 'Copied' : 'Copy'}</Text>
+          <Text style={[TYPE.code, { color: theme.codeInk, flex: 1 }]}>{BRIDGE_COMMAND}</Text>
+          <View style={styles.copy}>
+            <Icon name={copied ? 'check' : 'copy'} size={14} color={theme.codeInk} />
+            <Text style={[TYPE.codeLabel, { color: theme.codeInk }]}>{copied ? 'Copied' : 'Copy'}</Text>
+          </View>
         </Pressable>
-        {label('Bridge address')}
-        <TextInput
+        <TextField
+          label="Bridge address"
           value={draft.bridgeUrl}
           onChangeText={(v) => set('bridgeUrl', v.trim())}
           onBlur={() => draft.bridgeUrl && set('bridgeUrl', normalizeBridgeUrl(draft.bridgeUrl))}
@@ -300,58 +367,76 @@ export default function ConnectionsScreen() {
           autoCorrect={false}
           keyboardType="url"
           placeholder="http://192.168.1.24:8765"
-          placeholderTextColor={theme.muted}
-          style={[input, { backgroundColor: theme.bg }]}
+          mono
         />
-        {label('Pairing code')}
-        <TextInput
+        <TextField
+          label="Pairing code"
           value={draft.bridgeToken}
           onChangeText={(v) => set('bridgeToken', v.trim())}
           autoCapitalize="none"
           autoCorrect={false}
           placeholder="XXXX-XXXX-XXXX"
-          placeholderTextColor={theme.muted}
-          style={[input, { backgroundColor: theme.bg }]}
+          mono
         />
         {statusLine(laptop)}
         {actions(testLaptop, () => {
           set('bridgeUrl', '');
           set('bridgeToken', '');
           setLaptop({ state: 'idle' });
-        }, !!draft.bridgeUrl && !!draft.bridgeToken)}
-      </View>
+        }, laptopOn)}
+      </Card>
 
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Text style={[styles.title, { color: theme.text }]}>Permissions</Text>
-        {(
-          [
-            ['confirmCommands', 'Ask before running commands', 'Every command on your laptop needs your OK'],
-            ['confirmWrites', 'Ask before writing files or committing', 'Review each file change, commit and new issue'],
-            ['confirmReads', 'Ask before reading', 'Off: TryChat can list and read files on its own'],
-          ] as const
-        ).map(([key, title, desc]) => (
-          <View key={key} style={[styles.switchRow, { borderTopColor: theme.border }]}>
-            <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={{ color: theme.text, fontSize: 15 }}>{title}</Text>
-              <Text style={{ color: theme.muted, fontSize: 12, marginTop: 2 }}>{desc}</Text>
+      <SectionLabel>Permissions</SectionLabel>
+      <Card>
+        {PERMISSIONS.map(([key, title, desc], i) => (
+          <Fragment key={key}>
+            {i > 0 && <Divider inset={16} />}
+            <View style={styles.switchRow}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[TYPE.callout, { color: theme.ink }]}>{title}</Text>
+                <Text style={[TYPE.caption, { color: theme.inkMuted, marginTop: 2 }]}>{desc}</Text>
+              </View>
+              <ClaySwitch value={draft[key]} onValueChange={(v) => set(key, v)} label={title} />
             </View>
-            <Switch value={draft[key]} onValueChange={(v) => set(key, v)} />
-          </View>
+          </Fragment>
         ))}
-      </View>
+      </Card>
     </KeyboardAwareScrollView>
   );
 }
 
+/** Text button at the end of a field (Show / Hide, Add). */
+function FieldAction({ title, label, onPress }: { title: string; label: string; onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={4}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.fieldAction,
+        { backgroundColor: pressed || hovered ? theme.surfaceRaised : 'transparent' },
+      ]}
+    >
+      <Text style={[TYPE.subhead, { color: theme.accent }]}>{title}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 16, marginTop: 16 },
-  title: { fontSize: 18, fontWeight: '600' },
-  label: { fontSize: 13, marginTop: 14, marginBottom: 6 },
-  help: { fontSize: 12, lineHeight: 17, marginTop: 6 },
-  input: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, minHeight: 44 },
-  button: { minHeight: 44, paddingHorizontal: 24, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
-  command: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 10, padding: 12, marginTop: 12 },
-  mono: { fontFamily: 'monospace', fontSize: 12 },
-  repoRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44, borderTopWidth: StyleSheet.hairlineWidth, marginTop: 8 },
-  switchRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, marginTop: 4 },
+  page: { paddingBottom: 48, width: '100%', maxWidth: SIZE.contentMax, alignSelf: 'center' },
+  card: { padding: 16, gap: 12, marginTop: 16 },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  testing: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  mono: { fontFamily: FONT.mono, fontSize: 14, lineHeight: 20 },
+  repoRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, gap: 8, marginRight: -8 },
+  pickRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48, paddingHorizontal: 8, marginHorizontal: -8, borderRadius: RADIUS.sm },
+  check: { width: 22, height: 22, borderRadius: RADIUS.xs, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  folderRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: RADIUS.sm },
+  command: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: RADIUS.sm, padding: 12, minHeight: 44 },
+  copy: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  fieldAction: { minHeight: 40, paddingHorizontal: 12, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center' },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingHorizontal: 16, paddingVertical: 10 },
 });

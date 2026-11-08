@@ -1,9 +1,120 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { Animated, Easing, Modal, Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import type { StyleProp, ViewStyle } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useTheme } from '../lib/theme';
-import { Text, TextInput } from './Text';
+import { RADIUS, TYPE, WIDE_BREAKPOINT, shadow, useTheme } from '../lib/theme';
+import { Text } from './Text';
+import { IconButton, PillButton, TextField } from './ui';
+
+/** From 900px wide (iPad, desktop, web) sheets open as centred dialogs. */
+export function useWideSheet(): boolean {
+  return useWindowDimensions().width >= WIDE_BREAKPOINT;
+}
+
+/**
+ * The design system's Sheet, drawn inside a transparent Modal (use `animationType="fade"`).
+ * On phones it rises from the bottom: surface-raised, top radius 22, a grabber, the scrim behind.
+ * From 900px it is a centred 440px dialog. Tapping the scrim or the Close button calls `onClose`.
+ */
+export function Sheet({
+  title,
+  subtitle,
+  onClose,
+  closeButton = true,
+  keyboard,
+  alert,
+  children,
+  style,
+}: {
+  title?: string;
+  subtitle?: string;
+  /** Omit (or pass undefined) while the sheet must stay open, e.g. during a send. */
+  onClose?: () => void;
+  closeButton?: boolean;
+  /** Ride above the keyboard (sheets with a text field). */
+  keyboard?: boolean;
+  alert?: boolean;
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const wide = useWideSheet();
+  const [rise] = useState(() => new Animated.Value(wide ? 0 : 1));
+
+  useEffect(() => {
+    Animated.timing(rise, {
+      toValue: 0,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [rise]);
+
+  const panel = (
+    <Animated.View
+      accessibilityRole={alert ? 'alert' : undefined}
+      accessibilityViewIsModal
+      style={[
+        { backgroundColor: theme.surfaceRaised },
+        shadow(theme, 'sheet'),
+        wide ? styles.dialog : [styles.sheet, { paddingBottom: insets.bottom + 16 }],
+        { transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [0, 600] }) }] },
+        style,
+      ]}
+    >
+      {!wide && <View style={[styles.grabber, { backgroundColor: theme.borderStrong }]} />}
+      {!!title && (
+        <View style={styles.head}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[TYPE.headline, { color: theme.ink }]} numberOfLines={2} accessibilityRole="header">
+              {title}
+            </Text>
+            {!!subtitle && (
+              <Text style={[TYPE.caption, { color: theme.inkMuted, marginTop: 2 }]} numberOfLines={1}>
+                {subtitle}
+              </Text>
+            )}
+          </View>
+          {closeButton && !!onClose && <IconButton name="x" label="Close" onPress={onClose} style={styles.close} />}
+        </View>
+      )}
+      {children}
+    </Animated.View>
+  );
+
+  const place = wide ? styles.center : styles.bottom;
+  return (
+    <View style={styles.fill}>
+      <Pressable
+        style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }]}
+        onPress={onClose}
+        disabled={!onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
+      {keyboard ? (
+        // The keyboard already covers the bottom inset, so subtract it to avoid a doubled gap.
+        <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={wide ? 0 : -insets.bottom} style={place} pointerEvents="box-none">
+          {panel}
+        </KeyboardAvoidingView>
+      ) : (
+        <View style={place} pointerEvents="box-none">
+          {panel}
+        </View>
+      )}
+    </View>
+  );
+}
+
+/** Cancel (secondary) beside the main action: equal halves on phones, right-aligned in a dialog. */
+export function SheetActions({ children }: { children: ReactNode }) {
+  const wide = useWideSheet();
+  return <View style={[styles.actions, wide ? { justifyContent: 'flex-end' } : styles.actionsPhone]}>{children}</View>;
+}
 
 interface Props {
   visible: boolean;
@@ -26,7 +137,7 @@ export function TextPrompt(props: Props) {
 }
 
 function PromptBody({ title, initialValue = '', placeholder, multiline, onSubmit, onClose }: Props) {
-  const theme = useTheme();
+  const wide = useWideSheet();
   const [value, setValue] = useState(initialValue);
 
   const submit = () => {
@@ -34,41 +145,38 @@ function PromptBody({ title, initialValue = '', placeholder, multiline, onSubmit
     onClose();
   };
 
+  const size = wide ? 'md' : 'lg';
   return (
-    <KeyboardAvoidingView behavior="padding" style={styles.backdrop}>
-      <View style={[styles.card, { backgroundColor: theme.bg }]}>
-        <Text style={{ color: theme.text, fontSize: 17, fontWeight: '700', marginBottom: 12 }}>{title}</Text>
-        <TextInput
-          value={value}
-          onChangeText={setValue}
-          placeholder={placeholder}
-          placeholderTextColor={theme.muted}
-          autoFocus
-          multiline={multiline}
-          onSubmitEditing={multiline ? undefined : submit}
-          returnKeyType={multiline ? 'default' : 'done'}
-          submitBehavior={multiline ? 'newline' : 'submit'}
-          style={[
-            styles.input,
-            { backgroundColor: theme.surface, color: theme.text, minHeight: multiline ? 90 : undefined },
-          ]}
-        />
-        <View style={styles.actions}>
-          <Pressable onPress={onClose} hitSlop={8}>
-            <Text style={{ color: theme.muted, fontSize: 16 }}>Cancel</Text>
-          </Pressable>
-          <Pressable onPress={submit} hitSlop={8}>
-            <Text style={{ color: theme.primary, fontSize: 16, fontWeight: '700' }}>Save</Text>
-            </Pressable>
-          </View>
-        </View>
-      </KeyboardAvoidingView>
+    <Sheet title={title} onClose={onClose} closeButton={false} keyboard>
+      <TextField
+        value={value}
+        onChangeText={setValue}
+        placeholder={placeholder}
+        accessibilityLabel={title}
+        autoFocus
+        multiline={multiline}
+        onSubmitEditing={multiline ? undefined : submit}
+        returnKeyType={multiline ? 'default' : 'done'}
+        submitBehavior={multiline ? 'newline' : 'submit'}
+        style={{ marginTop: 4 }}
+      />
+      <SheetActions>
+        <PillButton title="Cancel" variant="secondary" size={size} onPress={onClose} style={!wide && { flex: 1 }} />
+        <PillButton title="Save" size={size} onPress={submit} style={!wide && { flex: 1 }} />
+      </SheetActions>
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 },
-  card: { borderRadius: 14, padding: 18 },
-  input: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, textAlignVertical: 'top' },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 24, marginTop: 16 },
+  fill: { flex: 1 },
+  bottom: { flex: 1, justifyContent: 'flex-end' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  sheet: { borderTopLeftRadius: RADIUS.lg, borderTopRightRadius: RADIUS.lg, paddingTop: 8, paddingHorizontal: 16, maxHeight: '90%' },
+  dialog: { width: '100%', maxWidth: 440, maxHeight: '90%', borderRadius: RADIUS.lg, paddingTop: 20, paddingHorizontal: 24, paddingBottom: 24 },
+  grabber: { width: 36, height: 5, borderRadius: RADIUS.pill, alignSelf: 'center', marginBottom: 8 },
+  head: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingTop: 4, paddingBottom: 12 },
+  close: { marginTop: -10, marginRight: -10 },
+  actions: { flexDirection: 'row', gap: 8, marginTop: 20 },
+  actionsPhone: { alignItems: 'stretch' },
 });

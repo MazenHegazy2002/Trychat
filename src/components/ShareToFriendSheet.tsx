@@ -1,20 +1,19 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { listFriends, shareFile } from '../lib/social';
 import { useStore } from '../lib/store';
-import { useTheme } from '../lib/theme';
+import { RADIUS, TYPE, useTheme } from '../lib/theme';
 import type { Attachment, Friend } from '../lib/types';
-import { Icon, PillButton } from './ui';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
-import { Text, TextInput } from './Text';
+import { Sheet, SheetActions, useWideSheet } from './TextPrompt';
+import { Banner, EmptyState, Icon, PillButton, TextField } from './ui';
+import { Text } from './Text';
 
 /** Bottom sheet to send files to one or more friends. */
 export function ShareToFriendSheet({ visible, files, onClose }: { visible: boolean; files: Attachment[]; onClose: () => void }) {
   return (
-    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
       {/* Mounted only while open, so every opening starts fresh. */}
       {visible && <SheetBody files={files} onClose={onClose} />}
     </Modal>
@@ -23,7 +22,6 @@ export function ShareToFriendSheet({ visible, files, onClose }: { visible: boole
 
 function SheetBody({ files, onClose }: { files: Attachment[]; onClose: () => void }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { account } = useStore();
   const [friends, setFriends] = useState<Friend[] | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -75,29 +73,35 @@ function SheetBody({ files, onClose }: { files: Attachment[]; onClose: () => voi
   const allDone = files.length > 0 && files.every((f) => done.includes(f.id));
   const names = (friends ?? []).filter((f) => selected.has(f.id)).map((f) => f.name || f.email);
 
+  const wide = useWideSheet();
+  const size = wide ? 'md' : 'lg';
+  const primaryTitle = allDone ? 'Sent' : Object.keys(errors).length ? 'Try again' : names.length ? `Send to ${names.length === 1 ? names[0] : `${names.length} friends`}` : 'Choose friends';
+
   let content;
   if (!account) {
     content = (
-      <View style={styles.empty}>
-        <Text style={{ color: theme.muted, fontSize: 14, textAlign: 'center' }}>Sign in to your account to send files to friends.</Text>
-        <PillButton title="Sign in" onPress={() => go('/account')} style={{ marginTop: 14 }} />
-      </View>
+      <EmptyState icon="users" title="Sign in to send files" action={<PillButton title="Sign in" onPress={() => go('/account')} />} style={styles.empty}>
+        Sign in to your account to send files to friends.
+      </EmptyState>
     );
   } else if (loadError) {
-    content = <Text style={{ color: theme.danger, padding: 20 }}>{loadError}</Text>;
+    content = (
+      <Banner tone="danger" title="Couldn’t load your friends" style={{ borderWidth: 1, borderColor: theme.danger }}>
+        {loadError}
+      </Banner>
+    );
   } else if (!friends) {
-    content = <ActivityIndicator color={theme.primary} style={{ padding: 24 }} />;
+    content = <ActivityIndicator color={theme.inkMuted} style={{ padding: 24 }} />;
   } else if (!friends.length) {
     content = (
-      <View style={styles.empty}>
-        <Text style={{ color: theme.muted, fontSize: 14, textAlign: 'center' }}>No friends yet. Add someone by their account email first.</Text>
-        <PillButton title="Add friends" icon="user-plus" onPress={() => go('/friends')} style={{ marginTop: 14 }} />
-      </View>
+      <EmptyState icon="user-plus" title="No friends yet" action={<PillButton title="Add friends" icon="user-plus" onPress={() => go('/friends')} />} style={styles.empty}>
+        Add someone by their account email first.
+      </EmptyState>
     );
   } else {
     content = (
       <>
-        <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled">
+        <ScrollView style={{ maxHeight: 260, flexGrow: 0 }} keyboardShouldPersistTaps="handled">
           {friends.map((f) => {
             const on = selected.has(f.id);
             return (
@@ -105,96 +109,92 @@ function SheetBody({ files, onClose }: { files: Attachment[]; onClose: () => voi
                 key={f.id}
                 onPress={() => toggle(f.id)}
                 disabled={sending}
-                style={[styles.row, on && { backgroundColor: theme.surface2 }]}
+                style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                  styles.row,
+                  { backgroundColor: on ? theme.accentSoft : pressed || hovered ? theme.fill : 'transparent' },
+                ]}
                 accessibilityRole="checkbox"
-                accessibilityState={{ checked: on }}
+                accessibilityLabel={f.name || f.email}
+                accessibilityState={{ checked: on, disabled: sending }}
               >
-                <View style={[styles.avatar, { backgroundColor: theme.oat }]}>
-                  <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 15 }}>{(f.name || f.email)[0]?.toUpperCase()}</Text>
+                <View style={[styles.avatar, { backgroundColor: theme.fill }]}>
+                  <Text style={{ color: theme.ink, fontSize: 15, fontWeight: '600' }}>{(f.name || f.email)[0]?.toUpperCase()}</Text>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.text, fontSize: 15 }} numberOfLines={1}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[TYPE.callout, { color: theme.ink }, on && { fontWeight: '600' }]} numberOfLines={1}>
                     {f.name || f.email}
                   </Text>
-                  <Text style={{ color: theme.faint, fontSize: 12 }} numberOfLines={1}>
+                  <Text style={[TYPE.caption, { color: theme.inkMuted }]} numberOfLines={1}>
                     {f.email}
                   </Text>
                 </View>
-                <View style={[styles.check, { borderColor: on ? theme.accent : theme.border, backgroundColor: on ? theme.accent : 'transparent' }]}>
-                  {on && <Icon name="check" size={14} color="#FFFFFF" />}
+                <View style={[styles.check, { borderColor: on ? theme.accent : theme.borderStrong, backgroundColor: on ? theme.accent : 'transparent' }]}>
+                  {on && <Icon name="check" size={14} color={theme.onAccent} />}
                 </View>
               </Pressable>
             );
           })}
         </ScrollView>
-        <TextInput
+        <TextField
           value={note}
           onChangeText={setNote}
           placeholder="Add a note (optional)"
-          placeholderTextColor={theme.faint}
+          accessibilityLabel="Note"
           maxLength={500}
           editable={!sending}
-          style={[styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }]}
+          style={{ marginTop: 12 }}
         />
         {files.map((f) => {
           const err = errors[f.id];
           const p = progress[f.id];
-          const state = done.includes(f.id) ? 'Sent' : err ? '' : sending && p !== undefined ? `${Math.round(p * 100)}%` : '';
+          const sent = done.includes(f.id);
+          const state = sent ? 'Sent' : err ? 'Failed' : sending && p !== undefined ? `${Math.round(p * 100)}%` : '';
           return (
             <View key={f.id} style={styles.fileRow}>
-              <Icon name={done.includes(f.id) ? 'check-circle' : err ? 'alert-circle' : 'file'} size={16} color={err ? theme.danger : done.includes(f.id) ? theme.accent : theme.muted} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.text, fontSize: 13 }} numberOfLines={1}>
+              <Icon name={sent ? 'check-circle' : err ? 'alert-circle' : 'file'} size={16} color={err ? theme.danger : sent ? theme.success : theme.inkMuted} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[TYPE.caption, { color: theme.ink }]} numberOfLines={1}>
                   {f.name}
                 </Text>
-                {!!err && <Text style={{ color: theme.danger, fontSize: 12 }}>{err}</Text>}
-                {sending && p !== undefined && !done.includes(f.id) && (
-                  <View style={[styles.bar, { backgroundColor: theme.surface2 }]}>
+                {!!err && <Text style={[TYPE.caption, { color: theme.danger }]}>{err}</Text>}
+                {sending && p !== undefined && !sent && (
+                  <View style={[styles.bar, { backgroundColor: theme.fill }]}>
                     <View style={{ width: `${Math.round(p * 100)}%`, height: '100%', backgroundColor: theme.accent }} />
                   </View>
                 )}
               </View>
-              <Text style={{ color: theme.faint, fontSize: 12 }}>{state}</Text>
+              <Text style={[TYPE.codeLabel, { color: sent ? theme.success : err ? theme.danger : theme.inkFaint }]}>{state}</Text>
             </View>
           );
         })}
-        <PillButton
-          title={allDone ? 'Sent' : Object.keys(errors).length ? 'Try again' : names.length ? `Send to ${names.length === 1 ? names[0] : `${names.length} friends`}` : 'Choose friends'}
-          icon={allDone ? 'check' : 'send'}
-          onPress={allDone ? onClose : send}
-          loading={sending}
-          disabled={!selected.size}
-          style={{ marginHorizontal: 20, marginTop: 12 }}
-        />
+        <SheetActions>
+          <PillButton title="Cancel" variant="secondary" size={size} onPress={onClose} disabled={sending} />
+          <PillButton
+            title={primaryTitle}
+            icon={allDone ? 'check' : 'send'}
+            size={size}
+            onPress={allDone ? onClose : send}
+            loading={sending}
+            disabled={!selected.size}
+            style={!wide && { flex: 1 }}
+          />
+        </SheetActions>
       </>
     );
   }
 
   return (
-    // Keyboard height already covers the bottom inset, so subtract it to avoid a doubled gap.
-    <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={-insets.bottom} style={{ flex: 1 }}>
-      <Pressable style={styles.scrim} onPress={sending ? undefined : onClose} accessibilityLabel="Close" />
-      <View style={[styles.sheet, { backgroundColor: theme.bg, paddingBottom: insets.bottom + 12 }]}>
-        <View style={[styles.grabber, { backgroundColor: theme.oat }]} />
-        <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 22, paddingHorizontal: 20 }}>Send to friends</Text>
-        <Text style={{ color: theme.muted, fontSize: 13, paddingHorizontal: 20, marginTop: 2, marginBottom: 8 }} numberOfLines={1}>
-          {files.length === 1 ? files[0].name : `${files.length} files`}
-        </Text>
-        {content}
-      </View>
-    </KeyboardAvoidingView>
+    <Sheet title="Send to friends" subtitle={files.length === 1 ? files[0].name : `${files.length} files`} onClose={sending ? undefined : onClose} keyboard>
+      {content}
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  scrim: { flex: 1, backgroundColor: 'rgba(20,20,19,0.4)' },
-  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 8, maxHeight: '85%' },
-  grabber: { width: 36, height: 5, borderRadius: 3, alignSelf: 'center', marginBottom: 12 },
-  empty: { padding: 20, alignItems: 'center' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, marginHorizontal: 8, paddingHorizontal: 12, borderRadius: 12 },
-  avatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  empty: { paddingVertical: 24 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingHorizontal: 12, borderRadius: RADIUS.sm },
+  avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   check: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, minHeight: 44, marginHorizontal: 20, marginTop: 10 },
-  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, marginTop: 10 },
+  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 4, marginTop: 12 },
   bar: { height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 4 },
 });

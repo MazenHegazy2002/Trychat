@@ -8,12 +8,13 @@ import { copyFileText, fileOnDevice, openWithApp, saveToDevice, shareFile } from
 import { MAX_TEXT_PREVIEW_BYTES, fileGroup, isTextLike, typeLabel } from '../lib/fileKinds';
 import type { FileGroup } from '../lib/fileKinds';
 import { readFileText } from '../lib/fileTools';
-import { useTheme } from '../lib/theme';
+import { RADIUS, TYPE, useTheme } from '../lib/theme';
 import type { Attachment } from '../lib/types';
 import { displayUri } from '../lib/webFiles';
 import { HtmlView } from './HtmlView';
 import { ShareToFriendSheet } from './ShareToFriendSheet';
-import { Icon } from './ui';
+import { Sheet } from './TextPrompt';
+import { EmptyState, Icon, IconButton, PillButton } from './ui';
 import type { IconName } from './ui';
 import { Text } from './Text';
 
@@ -31,7 +32,39 @@ const ICONS: Record<FileGroup, IconName> = {
   other: 'file',
 };
 
-export const fileIcon = (a: Pick<Attachment, 'name' | 'mimeType'>): IconName => ICONS[fileGroup(a.name, a.mimeType)];
+const ext = (name: string) => (/\.([a-z0-9]+)$/i.exec(name)?.[1] ?? '').toLowerCase();
+
+/** Office, PDF and HTML files by extension too: generated files sometimes carry a generic type. */
+const BY_EXT: Record<string, [IconName, string]> = {
+  xlsx: ['grid', 'Excel spreadsheet'],
+  xls: ['grid', 'Excel spreadsheet'],
+  docx: ['file-text', 'Word document'],
+  doc: ['file-text', 'Word document'],
+  pptx: ['monitor', 'PowerPoint'],
+  ppt: ['monitor', 'PowerPoint'],
+  pdf: ['file-text', 'PDF'],
+  html: ['globe', 'HTML document'],
+  htm: ['globe', 'HTML document'],
+};
+
+/** HTML pages read as documents: they open right here in the viewer. */
+const isHtmlDoc = (a: Pick<Attachment, 'name' | 'mimeType'>) => a.mimeType === 'text/html';
+
+export const fileIcon = (a: Pick<Attachment, 'name' | 'mimeType'>): IconName => {
+  if (isHtmlDoc(a)) return 'globe';
+  const g = fileGroup(a.name, a.mimeType);
+  if (g === 'other' || g === 'code' || g === 'archive') return BY_EXT[ext(a.name)]?.[0] ?? ICONS[g];
+  return ICONS[g];
+};
+
+/** "PDF", "Word document", "Excel spreadsheet", "PowerPoint", "HTML document", "PNG image"… */
+export function fileTypeLabel(a: Pick<Attachment, 'name' | 'mimeType'>): string {
+  if (isHtmlDoc(a)) return 'HTML document';
+  const byExt = BY_EXT[ext(a.name)]?.[1];
+  const label = typeLabel(a.name, a.mimeType);
+  if (byExt && /file$|^File$|archive$|^Spreadsheet$|^Presentation$/.test(label)) return byExt;
+  return label;
+}
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -130,13 +163,13 @@ export function FileCards({ files }: { files: Attachment[]; conversationId?: str
               {fileOnDevice(a) ? (
                 <Image
                   source={{ uri: displayUri(a.uri) }}
-                  style={[images.length === 1 ? styles.single : styles.multi, { backgroundColor: theme.surface2 }]}
+                  style={[images.length === 1 ? styles.single : styles.multi, { backgroundColor: theme.fill, borderColor: theme.border }]}
                   resizeMode="cover"
                 />
               ) : (
-                <View style={[styles.multi, styles.missing, { backgroundColor: theme.surface2 }]}>
-                  <Icon name="image" size={22} />
-                  <Text style={{ color: theme.faint, fontSize: 11, marginTop: 4 }}>Not on this device</Text>
+                <View style={[styles.multi, styles.missing, { backgroundColor: theme.fill, borderColor: theme.border }]}>
+                  <Icon name="image" size={20} />
+                  <Text style={[TYPE.caption, { color: theme.inkFaint, fontSize: 12, marginTop: 4, textAlign: 'center' }]}>Not on this device</Text>
                 </View>
               )}
             </Pressable>
@@ -151,28 +184,37 @@ export function FileCards({ files }: { files: Attachment[]; conversationId?: str
   );
 }
 
-/** One non-image file: icon, name, size · type, and Open / Share / Save / more. */
+/** The 40px tile on `fill` with the file's type icon. */
+export function FileTile({ file, size = 40 }: { file: Pick<Attachment, 'name' | 'mimeType'>; size?: number }) {
+  const theme = useTheme();
+  return (
+    <View style={[styles.tile, { width: size, height: size, backgroundColor: theme.fill }]}>
+      <Icon name={fileIcon(file)} size={size >= 40 ? 20 : 16} color={theme.ink} />
+    </View>
+  );
+}
+
+/** One non-image file: icon, name, type · size, and Open / Share / Save / more. */
 export function FileCard({ file: a, onOpen, onMore }: { file: Attachment; onOpen: () => void; onMore: () => void }) {
   const theme = useTheme();
   const here = fileOnDevice(a);
+  const type = fileTypeLabel(a);
   return (
     <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <Pressable
         onPress={onOpen}
         onLongPress={onMore}
-        style={styles.cardMain}
+        style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.cardMain, (pressed || hovered) && { backgroundColor: theme.fill }]}
         accessibilityRole="button"
-        accessibilityLabel={`${a.name}, ${typeLabel(a.name, a.mimeType)}, ${formatSize(a.size)}. Tap to open, long-press for options`}
+        accessibilityLabel={`${a.name}, ${type}, ${formatSize(a.size)}. Tap to open, long-press for options`}
       >
-        <View style={[styles.iconTile, { backgroundColor: theme.surface2 }]}>
-          <Icon name={fileIcon(a)} size={20} color={theme.text} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }} numberOfLines={2}>
+        <FileTile file={a} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[TYPE.callout, { color: theme.ink, fontWeight: '500' }]} numberOfLines={2}>
             {a.name}
           </Text>
-          <Text style={{ color: theme.muted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-            {here ? `${formatSize(a.size)} · ${typeLabel(a.name, a.mimeType)}` : 'Not on this device'}
+          <Text style={[TYPE.codeLabel, { color: theme.inkFaint, marginTop: 2 }]} numberOfLines={1}>
+            {here ? `${type} · ${formatSize(a.size)}` : 'Not on this device'}
           </Text>
         </View>
       </Pressable>
@@ -181,9 +223,7 @@ export function FileCard({ file: a, onOpen, onMore }: { file: Attachment; onOpen
           <CardButton icon="eye" label="Open" onPress={onOpen} />
           <CardButton icon="share" label="Share" onPress={() => act(() => shareFile(a))} />
           <CardButton icon="download" label="Save" onPress={() => act(() => saveWithFeedback(a))} />
-          <Pressable onPress={onMore} style={styles.moreBtn} accessibilityRole="button" accessibilityLabel={`More options for ${a.name}`}>
-            <Icon name="more-horizontal" size={18} color={theme.text} />
-          </Pressable>
+          <IconButton name="more-horizontal" label={`More options for ${a.name}`} onPress={onMore} />
         </View>
       )}
     </View>
@@ -193,14 +233,19 @@ export function FileCard({ file: a, onOpen, onMore }: { file: Attachment; onOpen
 function CardButton({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
   const theme = useTheme();
   return (
-    <Pressable onPress={onPress} style={styles.cardBtn} accessibilityRole="button" accessibilityLabel={label}>
-      <Icon name={icon} size={15} color={theme.text} />
-      <Text style={{ color: theme.text, fontSize: 13, fontWeight: '500' }}>{label}</Text>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.cardBtn, (pressed || hovered) && { backgroundColor: theme.fill }]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Icon name={icon} size={16} />
+      <Text style={[TYPE.subhead, { color: theme.ink }]}>{label}</Text>
     </Pressable>
   );
 }
 
-/** Bottom sheet with everything you can do with a file. */
+/** Sheet with everything you can do with a file. */
 export function FileActionSheet({
   file,
   onClose,
@@ -215,7 +260,6 @@ export function FileActionSheet({
   extra?: FileExtraAction[];
 }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   if (!file) return null;
   const here = fileOnDevice(file);
   const textLike = isTextLike(file.name, file.mimeType) && file.size <= MAX_TEXT_PREVIEW_BYTES;
@@ -247,32 +291,30 @@ export function FileActionSheet({
       : []),
     ...extra.map((x) => ({ label: x.label, icon: x.icon, destructive: x.destructive, run: () => x.onPress(file) })),
   ];
+  const firstDestructive = options.findIndex((o) => o.destructive);
   return (
-    <Modal statusBarTranslucent navigationBarTranslucent visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Close" />
-      <View style={[styles.sheet, { backgroundColor: theme.bg, paddingBottom: insets.bottom + 12 }]}>
-        <View style={[styles.grabber, { backgroundColor: theme.oat }]} />
-        <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 20, paddingHorizontal: 20 }} numberOfLines={2}>
-          {file.name}
-        </Text>
-        <Text style={{ color: theme.muted, fontSize: 13, paddingHorizontal: 20, marginTop: 2, marginBottom: 8 }}>
-          {here ? `${formatSize(file.size)} · ${typeLabel(file.name, file.mimeType)}` : 'Not on this device'}
-        </Text>
-        {options.map((o) => (
-          <Pressable
-            key={o.label}
-            onPress={() => {
-              onClose();
-              o.run();
-            }}
-            style={({ pressed }) => [styles.option, pressed && { backgroundColor: theme.surface2 }]}
-            accessibilityRole="button"
-          >
-            <Icon name={o.icon} size={20} color={o.destructive ? theme.danger : theme.text} />
-            <Text style={{ color: o.destructive ? theme.danger : theme.text, fontSize: 16 }}>{o.label}</Text>
-          </Pressable>
-        ))}
-      </View>
+    <Modal statusBarTranslucent navigationBarTranslucent visible transparent animationType="fade" onRequestClose={onClose}>
+      <Sheet title={file.name} subtitle={here ? `${fileTypeLabel(file)} · ${formatSize(file.size)}` : 'Not on this device'} onClose={onClose}>
+        <ScrollView style={{ flexShrink: 1 }} bounces={false}>
+          {options.map((o, i) => (
+            <View key={o.label}>
+              {i > 0 && i === firstDestructive && <View style={[styles.optionRule, { backgroundColor: theme.border }]} />}
+              <Pressable
+                onPress={() => {
+                  onClose();
+                  o.run();
+                }}
+                style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.option, (pressed || hovered) && { backgroundColor: theme.fill }]}
+                accessibilityRole="button"
+                accessibilityLabel={o.label}
+              >
+                <Icon name={o.icon} size={20} color={o.destructive ? theme.danger : theme.inkMuted} />
+                <Text style={[TYPE.callout, { color: o.destructive ? theme.danger : theme.ink }]}>{o.label}</Text>
+              </Pressable>
+            </View>
+          ))}
+        </ScrollView>
+      </Sheet>
     </Modal>
   );
 }
@@ -301,26 +343,23 @@ export function FileViewer({ file, onClose, onMore }: { file: Attachment | null;
   const loading = isText && loaded?.uri !== file?.uri;
 
   if (!file) return null;
-  const dark = isImage;
-  const fg = dark ? '#FFFFFF' : theme.text;
   const folder = file.uri.slice(0, file.uri.lastIndexOf('/') + 1);
 
   return (
     <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
-      <View style={{ flex: 1, backgroundColor: dark ? '#000000' : theme.bg, paddingTop: insets.top }}>
-        <View style={styles.viewerBar}>
-          <Pressable onPress={onClose} style={styles.barBtn} accessibilityRole="button" accessibilityLabel="Close">
-            <Icon name="x" size={22} color={fg} />
-          </Pressable>
-          <Text style={{ flex: 1, color: fg, fontSize: 16, fontWeight: '600' }} numberOfLines={1}>
-            {file.name}
-          </Text>
-          <Pressable onPress={() => act(() => shareFile(file))} style={styles.barBtn} accessibilityRole="button" accessibilityLabel="Share">
-            <Icon name="share" size={20} color={fg} />
-          </Pressable>
-          <Pressable onPress={() => onMore(file)} style={styles.barBtn} accessibilityRole="button" accessibilityLabel="More options">
-            <Icon name="more-horizontal" size={22} color={fg} />
-          </Pressable>
+      <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
+        <View style={[styles.viewerBar, { borderBottomColor: theme.border }]}>
+          <IconButton name="x" label="Close" onPress={onClose} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[TYPE.headline, { color: theme.ink, fontSize: 16 }]} numberOfLines={1}>
+              {file.name}
+            </Text>
+            <Text style={[TYPE.codeLabel, { color: theme.inkFaint }]} numberOfLines={1}>
+              {fileTypeLabel(file)} · {formatSize(file.size)}
+            </Text>
+          </View>
+          <IconButton name="share" label="Share" onPress={() => act(() => shareFile(file))} />
+          <IconButton name="more-horizontal" label="More options" onPress={() => onMore(file)} />
         </View>
         <View style={{ flex: 1, paddingBottom: insets.bottom }}>
           {isImage ? (
@@ -334,12 +373,12 @@ export function FileViewer({ file, onClose, onMore }: { file: Attachment | null;
               <Image source={{ uri: displayUri(file.uri) }} style={{ flex: 1, width: '100%', minHeight: 300 }} resizeMode="contain" accessibilityLabel={file.name} />
             </ScrollView>
           ) : loading ? (
-            <ActivityIndicator color={theme.muted} style={{ marginTop: 40 }} />
+            <ActivityIndicator color={theme.inkMuted} style={{ marginTop: 40 }} />
           ) : isHtml && text !== null ? (
             <HtmlView html={text} />
           ) : isText && text !== null ? (
-            <ScrollView contentContainerStyle={{ padding: 16 }}>
-              <Text selectable style={{ color: theme.text, fontFamily: 'monospace', fontSize: 13, lineHeight: 19 }}>
+            <ScrollView style={{ backgroundColor: theme.codeBg }} contentContainerStyle={{ padding: 16 }}>
+              <Text selectable style={[TYPE.code, { color: theme.codeInk }]}>
                 {text}
               </Text>
             </ScrollView>
@@ -354,19 +393,14 @@ export function FileViewer({ file, onClose, onMore }: { file: Attachment | null;
               style={{ backgroundColor: theme.bg }}
             />
           ) : (
-            <View style={styles.noPreview}>
-              <Icon name={fileIcon(file)} size={40} color={theme.muted} />
-              <Text style={{ color: theme.muted, textAlign: 'center', marginVertical: 12 }}>
-                {typeLabel(file.name, file.mimeType)} · {formatSize(file.size)}
-              </Text>
-              <Pressable
-                onPress={() => act(() => openWithApp(file))}
-                style={[styles.openBtn, { backgroundColor: theme.text }]}
-                accessibilityRole="button"
-              >
-                <Text style={{ color: theme.bg, fontWeight: '600' }}>Open with another app</Text>
-              </Pressable>
-            </View>
+            <EmptyState
+              icon={fileIcon(file)}
+              title={`${fileTypeLabel(file)} · ${formatSize(file.size)}`}
+              action={<PillButton title="Open with another app" icon="external-link" onPress={() => act(() => openWithApp(file))} />}
+              style={{ flex: 1, justifyContent: 'center' }}
+            >
+              There’s no preview for this file here. Open it in another app.
+            </EmptyState>
           )}
         </View>
       </View>
@@ -376,21 +410,15 @@ export function FileViewer({ file, onClose, onMore }: { file: Attachment | null;
 
 const styles = StyleSheet.create({
   imageRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  single: { width: 240, height: 240, borderRadius: 16 },
-  multi: { width: 116, height: 116, borderRadius: 12 },
-  missing: { alignItems: 'center', justifyContent: 'center' },
-  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, overflow: 'hidden', maxWidth: 420 },
+  single: { width: 240, height: 240, borderRadius: RADIUS.md, borderWidth: 1 },
+  multi: { width: 116, height: 116, borderRadius: RADIUS.sm, borderWidth: 1 },
+  missing: { alignItems: 'center', justifyContent: 'center', padding: 8 },
+  tile: { borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center' },
+  card: { borderWidth: 1, borderRadius: RADIUS.md, overflow: 'hidden', maxWidth: 420 },
   cardMain: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, minHeight: 64 },
-  iconTile: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  cardActions: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth },
-  cardBtn: { flex: 1, minHeight: 44, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center' },
-  moreBtn: { width: 48, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  scrim: { flex: 1, backgroundColor: 'rgba(20,20,19,0.4)' },
-  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 8 },
-  grabber: { width: 36, height: 5, borderRadius: 3, alignSelf: 'center', marginBottom: 12 },
-  option: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, minHeight: 52 },
-  viewerBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, minHeight: 52 },
-  barBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  noPreview: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  openBtn: { minHeight: 48, borderRadius: 999, paddingHorizontal: 22, alignItems: 'center', justifyContent: 'center' },
+  cardActions: { flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 4 },
+  cardBtn: { flex: 1, minHeight: 44, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.sm },
+  option: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, minHeight: 52, borderRadius: RADIUS.sm },
+  optionRule: { height: StyleSheet.hairlineWidth, marginVertical: 4, marginHorizontal: 12 },
+  viewerBar: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 4, minHeight: 56, borderBottomWidth: StyleSheet.hairlineWidth },
 });

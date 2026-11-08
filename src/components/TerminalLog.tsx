@@ -1,13 +1,34 @@
 import { useMemo, useRef } from 'react';
-import { Platform, ScrollView } from 'react-native';
+import { ScrollView } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
+
+import { RADIUS, THEMES, TYPE, useTheme } from '../lib/theme';
+import type { Theme } from '../lib/theme';
 import { Text } from './Text';
 
-export const TERM = { bg: '#141413', fg: '#E8E6DC', dim: '#9C9A92', err: '#F2B8B5', prompt: '#8FD18F' };
-export const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'ui-monospace, Menlo, Consolas, monospace' });
+/**
+ * Terminal palette. Code surfaces are `codeBg` in both themes, so everything on them uses the code
+ * tokens (and the dark theme's ink for the brightest text, which stays readable on `codeBg`).
+ */
+export function terminalColors(theme: Theme) {
+  return {
+    bg: theme.codeBg,
+    fg: theme.codeInk,
+    bright: THEMES.dark.ink,
+    dim: theme.syntaxComment,
+    ok: theme.codeOk,
+    err: theme.codeError,
+    warn: THEMES.dark.warning,
+    prompt: theme.syntaxKeyword,
+    border: THEMES.dark.border,
+  };
+}
 
-const COLORS = ['#3D3D3A', '#F07178', '#A8D982', '#FFCB6B', '#82AAFF', '#C792EA', '#89DDFF', '#E8E6DC'];
-const BRIGHT = ['#73726C', '#FF8B92', '#C3E88D', '#FFE08A', '#9CC4FF', '#DDB0F6', '#A6ECFF', '#FFFFFF'];
+/** ANSI colours mapped onto the code palette (black, red, green, yellow, blue, magenta, cyan, white), then bright white. */
+function ansiColors(theme: Theme): string[] {
+  const t = terminalColors(theme);
+  return [t.dim, t.err, t.ok, t.warn, theme.syntaxFunction, theme.syntaxKeyword, t.ok, t.fg, t.bright];
+}
 
 interface Span {
   text: string;
@@ -16,7 +37,7 @@ interface Span {
 }
 
 /** Splits text on basic ANSI SGR codes (colors 30–37/90–97, bold, reset); other escapes are dropped. */
-export function parseAnsi(input: string): Span[] {
+export function parseAnsi(input: string, palette: string[] = ansiColors(THEMES.dark)): Span[] {
   const spans: Span[] = [];
   let color: string | undefined;
   let bold = false;
@@ -38,25 +59,57 @@ export function parseAnsi(input: string): Span[] {
       } else if (code === 1) bold = true;
       else if (code === 22) bold = false;
       else if (code === 39) color = undefined;
-      else if (code >= 30 && code <= 37) color = COLORS[code - 30];
-      else if (code >= 90 && code <= 97) color = BRIGHT[code - 90];
+      else if (code >= 30 && code <= 37) color = palette[code - 30];
+      else if (code >= 90 && code <= 97) color = code === 97 ? (palette[8] ?? palette[7]) : palette[code - 90];
     }
   }
   push(input.slice(last));
   return spans;
 }
 
-/** Dark monospace log that follows new output unless the user has scrolled up. */
+/** Colour for an uncoloured line, from what it looks like: a prompt, a note, success, an error or a warning. */
+function lineColor(line: string, theme: Theme): string | undefined {
+  const t = terminalColors(theme);
+  const s = line.trimStart();
+  if (/^(\S*\s)?\$\s/.test(s) || s.startsWith('$ ')) return t.bright;
+  if (/^(>|#|…\[earlier output trimmed\]…)/.test(s)) return t.dim;
+  if (/^(✓|✔|√)|\b(passed|succeeded|success)\b/i.test(s) && !/\bfail/i.test(s)) return t.ok;
+  if (/^(✕|✗|×)|^(error|fatal|err!)\b|\bfailed\b|\bexception\b/i.test(s)) return t.err;
+  if (/^(\(!\)|⚠)|^warn(ing)?\b/i.test(s)) return t.warn;
+  return undefined;
+}
+
+/** Splits plain spans into lines so each uncoloured line can pick up its own colour. */
+function colourLines(spans: Span[], theme: Theme): Span[] {
+  const out: Span[] = [];
+  for (const s of spans) {
+    if (s.color) {
+      out.push(s);
+      continue;
+    }
+    for (const part of s.text.split(/(?<=\n)/)) {
+      if (part) out.push({ ...s, text: part, color: lineColor(part, theme) });
+    }
+  }
+  return out;
+}
+
+/** Monospace log on `codeBg` that follows new output unless the user has scrolled up. */
 export function TerminalLog({ text, style, children }: { text: string; style?: StyleProp<ViewStyle>; children?: React.ReactNode }) {
+  const theme = useTheme();
+  const t = terminalColors(theme);
   const ref = useRef<ScrollView>(null);
   const atBottom = useRef(true);
   // Only the last part is colored; very long logs render the rest plain for speed.
-  const spans = useMemo(() => parseAnsi(text.length > 60_000 ? text.slice(-60_000) : text), [text]);
+  const spans = useMemo(
+    () => colourLines(parseAnsi(text.length > 60_000 ? text.slice(-60_000) : text, ansiColors(theme)), theme),
+    [text, theme],
+  );
   return (
     <ScrollView
       ref={ref}
-      style={[{ flex: 1, backgroundColor: TERM.bg }, style]}
-      contentContainerStyle={{ padding: 12 }}
+      style={[{ flex: 1, backgroundColor: t.bg, borderRadius: RADIUS.md, borderWidth: 1, borderColor: theme.border }, style]}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12 }}
       onScroll={(e) => {
         const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
         atBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 40;
@@ -64,9 +117,9 @@ export function TerminalLog({ text, style, children }: { text: string; style?: S
       scrollEventThrottle={100}
       onContentSizeChange={() => atBottom.current && ref.current?.scrollToEnd({ animated: false })}
     >
-      <Text selectable style={{ color: TERM.fg, fontFamily: MONO, fontSize: 12.5, lineHeight: 18 }}>
+      <Text selectable style={[TYPE.code, { color: t.fg }]}>
         {spans.map((s, i) => (
-          <Text key={i} style={s.color || s.bold ? { color: s.color, fontWeight: s.bold ? '700' : undefined } : undefined}>
+          <Text key={i} style={s.color || s.bold ? { color: s.color, fontWeight: s.bold ? '600' : undefined } : undefined}>
             {s.text}
           </Text>
         ))}

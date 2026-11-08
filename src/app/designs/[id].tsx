@@ -1,12 +1,12 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View, useColorScheme } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HtmlView } from '../../components/HtmlView';
 import { KeyboardPadded } from '../../components/KeyboardPadded';
 import { TextPrompt } from '../../components/TextPrompt';
-import { Icon } from '../../components/ui';
+import { EmptyState, Icon, IconButton, RunningDot } from '../../components/ui';
 import { chat } from '../../lib/api';
 import { canvasSystemPrompt, exportBoardHtml, exportBoardPdf, exportBoardPng, exportPrototypeHtml, parseBoardEdits } from '../../lib/designTools';
 import { addBoard, canvasDocument, deleteBoard, duplicateBoard, renameDesign, updateBoard, useDesign } from '../../lib/designs';
@@ -14,19 +14,34 @@ import type { Board } from '../../lib/designs';
 import { shareFile } from '../../lib/fileActions';
 import { uid } from '../../lib/id';
 import { useStore } from '../../lib/store';
-import { useTheme } from '../../lib/theme';
+import { RADIUS, SIZE, TYPE, shadow, useTheme } from '../../lib/theme';
 import type { Attachment } from '../../lib/types';
 import { Text, TextInput } from '../../components/Text';
 
 /** Last pan/zoom per design, so rebuilding the canvas (new boards, coming back) keeps the view. */
 const lastView = new Map<string, { x: number; y: number; k: number }>();
 
+/** The one-sentence summary the model writes before its first board. */
+function summaryOf(text: string): string | null {
+  const at = text.search(/<board\b/i);
+  const lead = (at === -1 ? text : text.slice(0, at)).replace(/<[^>]+>/g, '').replace(/```\w*/g, '').trim();
+  return lead || null;
+}
+
+/** "Writing html… N lines" while boards stream in. */
+function writingStatus(text: string): string {
+  const at = text.search(/<board\b/i);
+  if (at === -1) return 'Designing…';
+  const lines = text.slice(at).split('\n').length;
+  return `Writing html… ${lines} line${lines === 1 ? '' : 's'}`;
+}
+
 /** Infinite canvas of a design's boards, with a prompt bar that asks the model for new or changed screens. */
 export default function DesignCanvas() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const design = useDesign(id);
   const theme = useTheme();
-  const dark = useColorScheme() === 'dark';
+  const dark = theme.dark;
   const insets = useSafeAreaInsets();
   const { settings } = useStore();
   const [fitKey, setFitKey] = useState(0);
@@ -36,6 +51,7 @@ export default function DesignCanvas() {
   const abort = useRef<AbortController | null>(null);
   const [stoppable, setStoppable] = useState(false);
   const [renaming, setRenaming] = useState<Board | 'design' | null>(null);
+  const [note, setNote] = useState<string | null>(null);
 
   // Rebuilt when boards change (keeping the current pan/zoom) or "Fit" is pressed.
   const boardsKey = design ? design.boards.map((b) => `${b.id}:${b.name}:${b.x}:${b.y}:${b.html.length}:${b.html.slice(-64)}`).join('|') : '';
@@ -97,12 +113,14 @@ export default function DesignCanvas() {
     if (!text || !design || busy) return;
     if (!settings.apiKey && !settings.baseUrl) return Alert.alert('Set up a model', 'Add your API key and model in Settings first.');
     setPrompt('');
+    setNote(null);
     setBusy('Designing…');
     const ctrl = new AbortController();
     abort.current = ctrl;
     setStoppable(true);
     try {
-      let shown = 0;
+      let shown = '';
+      let noted = false;
       const reply = await chat({
         settings,
         model: settings.model,
@@ -112,14 +130,19 @@ export default function DesignCanvas() {
           { role: 'user', content: text },
         ],
         onText: (t) => {
-          const n = (t.match(/<board\b/gi) ?? []).length;
-          if (n !== shown) {
-            shown = n;
-            setBusy(`Designing screen ${n}…`);
+          const status = writingStatus(t);
+          if (status !== shown) {
+            shown = status;
+            setBusy(status);
+          }
+          if (!noted && /<board\b/i.test(t)) {
+            noted = true;
+            setNote(summaryOf(t));
           }
         },
       });
       const edits = parseBoardEdits(reply);
+      if (!noted) setNote(summaryOf(reply));
       if (!edits.length) {
         Alert.alert('No screens in the reply', reply.replace(/<[^>]+>/g, '').slice(0, 400) || 'Try describing the screen in more detail.');
         return;
@@ -141,90 +164,112 @@ export default function DesignCanvas() {
   if (!design) {
     return (
       <View style={[styles.center, { backgroundColor: theme.bg }]}>
-        <Text style={{ color: theme.muted }}>This design no longer exists.</Text>
+        <EmptyState icon="pen-tool" title="This design no longer exists." />
       </View>
     );
   }
 
+  const canSend = !!prompt.trim() && !busy;
+  const screens = `${design.boards.length} screen${design.boards.length === 1 ? '' : 's'}`;
   return (
-    <View style={{ flex: 1, backgroundColor: theme.surface2 }}>
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <Stack.Screen
         options={{
           title: design.title,
+          headerTitle: () => (
+            <Pressable
+              onPress={() => setRenaming('design')}
+              accessibilityRole="button"
+              accessibilityLabel={design.title}
+              accessibilityHint="Rename design"
+              style={styles.titleButton}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: 220 }}>
+                <Text style={{ color: theme.ink, fontSize: 15, lineHeight: 20, fontWeight: '600', flexShrink: 1 }} numberOfLines={1}>
+                  {design.title}
+                </Text>
+                <Icon name="edit-2" size={12} color={theme.inkFaint} />
+              </View>
+              <Text style={{ color: theme.inkMuted, fontSize: 12, lineHeight: 16 }} numberOfLines={1}>
+                {screens}
+              </Text>
+            </Pressable>
+          ),
           headerRight: () => (
-            <View style={{ flexDirection: 'row', gap: 18, alignItems: 'center' }}>
-              <Pressable onPress={() => {
-                  lastView.delete(design.id);
-                  setFitKey((k) => k + 1);
-                }} hitSlop={10} accessibilityLabel="Zoom to fit">
-                <Icon name="maximize" size={19} color={theme.text} />
-              </Pressable>
-              <Pressable
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <IconButton
+                name="play"
+                label="Play prototype"
                 onPress={() => design.boards.length && router.push({ pathname: '/designs/play', params: { id: design.id } })}
-                hitSlop={10}
-                accessibilityLabel="Play prototype"
-              >
-                <Icon name="play" size={19} color={theme.text} />
-              </Pressable>
-              <Pressable
-                onPress={() =>
-                  Alert.alert(design.title, undefined, [
-                    { text: 'Rename design', onPress: () => setRenaming('design') },
-                    { text: 'Share prototype (HTML)', onPress: () => run('Preparing…', () => exportPrototypeHtml(design)) },
-                    { text: 'Cancel', style: 'cancel' },
-                  ])
-                }
-                hitSlop={10}
-                accessibilityLabel="Design options"
-              >
-                <Icon name="more-horizontal" size={20} color={theme.text} />
-              </Pressable>
+              />
+              <IconButton name="share" label="Share prototype (HTML)" onPress={() => run('Preparing…', () => exportPrototypeHtml(design))} />
             </View>
           ),
         }}
       />
       <KeyboardPadded bottomInset={Math.max(insets.bottom, 10) - 8}>
-        <View style={{ flex: 1 }}>
-          <HtmlView html={html} background={theme.surface2} onMessage={onMessage} />
+        <View style={{ flex: 1, backgroundColor: theme.dark ? theme.codeBg : theme.fill, borderTopWidth: 1, borderTopColor: theme.border }}>
+          <HtmlView html={html} background={theme.dark ? theme.codeBg : theme.fill} onMessage={onMessage} />
           {!!busy && (
-            <View style={[styles.busy, { backgroundColor: theme.text }]}>
-              <ActivityIndicator size="small" color={theme.bg} />
-              <Text style={{ color: theme.bg, fontSize: 13, fontWeight: '600' }}>{busy}</Text>
-              {stoppable && (
-                <Pressable onPress={() => abort.current?.abort()} hitSlop={8} accessibilityLabel="Stop">
-                  <Icon name="x" size={16} color={theme.bg} />
-                </Pressable>
-              )}
+            <View
+              accessibilityRole="progressbar"
+              accessibilityLiveRegion="polite"
+              style={[styles.busy, { backgroundColor: theme.surfaceRaised, borderColor: theme.border }, shadow(theme, 'raised')]}
+            >
+              <RunningDot />
+              <Text style={{ color: theme.ink, fontSize: 13, lineHeight: 18 }}>{busy}</Text>
             </View>
           )}
+          <IconButton
+            name="maximize"
+            label="Zoom to fit"
+            size={18}
+            onPress={() => {
+              lastView.delete(design.id);
+              setFitKey((k) => k + 1);
+            }}
+            style={[styles.fit, { backgroundColor: theme.surfaceRaised, borderColor: theme.border }, shadow(theme, 'raised')]}
+          />
         </View>
-        <View style={[styles.barWrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-          <View style={[styles.bar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <Icon name="pen-tool" size={17} color={theme.accent} />
+        <View style={[styles.barWrap, { paddingBottom: Math.max(insets.bottom, 10), backgroundColor: theme.bg, borderTopColor: theme.border }]}>
+          <Text style={note ? [TYPE.callout, styles.note, { color: theme.ink }] : [styles.note, { color: theme.inkFaint, fontSize: 12, lineHeight: 16 }]} numberOfLines={3}>
+            {note ?? 'Tap a board to preview · long-press for more · pinch or scroll to zoom'}
+          </Text>
+          <View style={[styles.bar, { backgroundColor: theme.surfaceRaised, borderColor: theme.border }, shadow(theme, 'raised')]}>
+            <Icon name="pen-tool" size={18} color={theme.inkFaint} style={{ marginLeft: 10 }} />
             <TextInput
               value={prompt}
               onChangeText={setPrompt}
               placeholder="Describe a screen or change…"
-              placeholderTextColor={theme.faint}
-              style={[styles.input, { color: theme.text }]}
+              style={[styles.input, { color: theme.ink }]}
               multiline
               onSubmitEditing={send}
               submitBehavior="submit"
               returnKeyType="send"
               accessibilityLabel="Describe a screen or change"
             />
-            <Pressable
-              onPress={send}
-              disabled={!prompt.trim() || !!busy}
-              accessibilityLabel="Send"
-              style={[styles.send, { backgroundColor: prompt.trim() && !busy ? theme.accent : theme.oat }]}
-            >
-              <Icon name="arrow-up" size={18} color="#FFFFFF" />
-            </Pressable>
+            {stoppable ? (
+              <Pressable onPress={() => abort.current?.abort()} accessibilityRole="button" accessibilityLabel="Stop" style={[styles.send, { backgroundColor: theme.ink }]}>
+                <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: theme.bg }} />
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={send}
+                disabled={!canSend}
+                accessibilityRole="button"
+                accessibilityLabel="Send"
+                accessibilityState={{ disabled: !canSend }}
+                style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                  styles.send,
+                  canSend
+                    ? [{ backgroundColor: pressed ? theme.accentPress : hovered ? theme.accentHover : theme.accent }, shadow(theme, 'glow')]
+                    : { backgroundColor: theme.fill },
+                ]}
+              >
+                <Icon name="arrow-up" size={22} color={canSend ? theme.onAccent : theme.inkFaint} />
+              </Pressable>
+            )}
           </View>
-          <Text style={{ color: theme.faint, fontSize: 11, textAlign: 'center', marginTop: 6 }}>
-            Tap a board to preview · long-press for more · pinch or scroll to zoom
-          </Text>
         </View>
       </KeyboardPadded>
       <TextPrompt
@@ -244,9 +289,41 @@ export default function DesignCanvas() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  busy: { position: 'absolute', top: 12, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-  barWrap: { paddingHorizontal: 12, paddingTop: 8 },
-  bar: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: StyleSheet.hairlineWidth, borderRadius: 24, paddingLeft: 16, paddingRight: 6, paddingVertical: 6, maxWidth: 760, width: '100%', alignSelf: 'center', shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
-  input: { flex: 1, fontSize: 15, maxHeight: 120, paddingVertical: 8, alignSelf: 'center' },
-  send: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  titleButton: { alignItems: 'center', justifyContent: 'center', minHeight: SIZE.controlMd, paddingHorizontal: 6 },
+  busy: {
+    position: 'absolute',
+    top: 14,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 32,
+    borderRadius: RADIUS.pill,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+  },
+  fit: { position: 'absolute', right: 12, bottom: 12, borderWidth: 1 },
+  barWrap: { paddingHorizontal: 12, paddingTop: 10, gap: 10, borderTopWidth: 1 },
+  note: { marginHorizontal: 4, maxWidth: SIZE.contentMax, width: '100%', alignSelf: 'center' },
+  bar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: RADIUS.lg,
+    padding: 4,
+    maxWidth: SIZE.contentMax,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    maxHeight: 120,
+    minHeight: SIZE.controlMd,
+    paddingHorizontal: 4,
+    paddingVertical: 11,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null),
+  },
+  send: { width: 40, height: 40, margin: 2, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center' },
 });

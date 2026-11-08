@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { Alert, Modal, ScrollView, StyleSheet, View } from 'react-native';
 import type { AlertButton } from 'react-native';
 
-import { useTheme } from '../lib/theme';
+import { TYPE, useTheme } from '../lib/theme';
 import { Text } from './Text';
+import { Sheet, useWideSheet } from './TextPrompt';
+import { PillButton } from './ui';
 
 /**
  * react-native-web's Alert.alert does nothing, and the app relies on it for confirmations
@@ -26,7 +29,7 @@ Alert.alert = (title, message, buttons, options) => {
 };
 
 export function AlertHost() {
-  const theme = useTheme();
+  const wide = useWideSheet();
   const [current, setCurrent] = useState<Dialog | null>(queue[0] ?? null);
 
   useEffect(() => {
@@ -47,44 +50,48 @@ export function AlertHost() {
   };
   const cancel = current.buttons.find((b) => b.style === 'cancel');
 
+  // One primary at most: the last plain button. Cancel is secondary, destructive buttons are danger.
+  const primary = current.buttons.reduce((last, b, i) => (b.style !== 'cancel' && b.style !== 'destructive' ? i : last), -1);
+  const stacked = current.buttons.length > 2;
   return (
     <Modal visible transparent animationType="fade" onRequestClose={() => (cancel ? close(cancel) : current.cancelable && close())}>
-      <Pressable style={styles.scrim} onPress={() => current.cancelable && (cancel ? close(cancel) : close())}>
-        <Pressable style={[styles.box, { backgroundColor: theme.bg, borderColor: theme.border }]} onPress={() => {}} accessibilityRole="alert">
-          <Text style={{ color: theme.text, fontSize: 17, fontWeight: '600', textAlign: 'center' }}>{current.title}</Text>
-          {!!current.message && <Text style={{ color: theme.muted, fontSize: 14, marginTop: 8, textAlign: 'center' }}>{current.message}</Text>}
-          <View style={[styles.buttons, current.buttons.length > 2 && { flexDirection: 'column' }]}>
-            {current.buttons.map((b, i) => (
-              <Pressable
-                key={i}
-                onPress={() => close(b)}
-                style={({ hovered }: any) => [
-                  styles.button,
-                  { borderColor: theme.border, backgroundColor: hovered ? theme.surface2 : theme.surface },
-                ]}
-                accessibilityRole="button"
-              >
-                <Text
-                  style={{
-                    color: b.style === 'destructive' ? theme.danger : theme.text,
-                    fontWeight: b.style === 'cancel' ? '400' : '600',
-                    textAlign: 'center',
-                  }}
-                >
-                  {b.text ?? 'OK'}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </Pressable>
-      </Pressable>
+      <AlertBody
+        title={current.title}
+        message={current.message}
+        onScrim={current.cancelable ? () => (cancel ? close(cancel) : close()) : undefined}
+      >
+        <View style={[styles.buttons, stacked ? styles.stacked : wide ? { justifyContent: 'flex-end' } : null]}>
+          {current.buttons.map((b, i) => (
+            <PillButton
+              key={i}
+              title={b.text ?? 'OK'}
+              onPress={() => close(b)}
+              variant={b.style === 'destructive' ? 'danger' : i === primary ? 'primary' : 'secondary'}
+              size={wide || stacked ? 'md' : 'lg'}
+              style={!wide && !stacked ? { flex: 1 } : undefined}
+            />
+          ))}
+        </View>
+      </AlertBody>
     </Modal>
   );
 }
 
+function AlertBody({ title, message, onScrim, children }: { title: string; message?: string; onScrim?: () => void; children: ReactNode }) {
+  const theme = useTheme();
+  return (
+    <Sheet title={title} onClose={onScrim} closeButton={false} alert>
+      {!!message && (
+        <ScrollView style={{ flexGrow: 0, flexShrink: 1 }}>
+          <Text style={[TYPE.callout, { color: theme.inkMuted }]}>{message}</Text>
+        </ScrollView>
+      )}
+      {children}
+    </Sheet>
+  );
+}
+
 const styles = StyleSheet.create({
-  scrim: { flex: 1, backgroundColor: 'rgba(20,20,19,0.4)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  box: { width: 340, maxWidth: '100%', borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 20 },
-  buttons: { flexDirection: 'row', gap: 8, marginTop: 18 },
-  button: { flex: 1, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth },
+  buttons: { flexDirection: 'row', gap: 8, marginTop: 20 },
+  stacked: { flexDirection: 'column', alignItems: 'stretch' },
 });

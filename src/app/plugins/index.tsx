@@ -1,30 +1,47 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import type { ViewStyle } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel } from '../../components/ui';
+import { Text } from '../../components/Text';
+import {
+  Card,
+  Chip,
+  ClaySwitch,
+  Divider,
+  EmptyState,
+  Icon,
+  IconButton,
+  IconTile,
+  PillButton,
+  ScreenIntro,
+  SearchField,
+  SectionLabel,
+  StatusBadge,
+  TextField,
+} from '../../components/ui';
 import type { IconName } from '../../components/ui';
 import { carryOverSettings, inspectGithubSource, installFromMarketplace, marketplacePluginId } from '../../lib/pluginInstaller';
 import type { MarketplaceEntry, MarketplaceInfo } from '../../lib/pluginInstaller';
 import { findNameConflict, missingConfig, pluginOrigin } from '../../lib/plugins';
 import { useStore } from '../../lib/store';
-import { useTheme } from '../../lib/theme';
+import { FONT, RADIUS, SIZE, SPACE, TYPE, WIDE_BREAKPOINT, shadow, useTheme } from '../../lib/theme';
 import type { Plugin } from '../../lib/types';
-import { Text, TextInput } from '../../components/Text';
 
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** What a plugin brings, e.g. [{ icon: 'layers', label: '3 skills', names: [...] }]. Empty parts are left out. */
+/** What a plugin brings, e.g. [{ icon: 'zap', label: '3 skills', names: [...] }]. Empty parts are left out. */
 function pluginParts(p: Plugin): { icon: IconName; label: string; names: string[] }[] {
   const parts: [IconName, string, string[]][] = [
-    ['layers', 'skill', p.skills.map((s) => s.name)],
+    ['zap', 'skill', p.skills.map((s) => s.name)],
     ['terminal', 'command', p.commands.map((c) => `/${c.name}`)],
     ['users', 'agent', p.agents.map((a) => a.name)],
-    ['zap', 'MCP server', p.mcpServers.map((m) => m.name)],
+    ['server', 'MCP server', p.mcpServers.map((m) => m.name)],
   ];
   return parts.filter(([, , names]) => names.length > 0).map(([icon, one, names]) => ({ icon, label: plural(names.length, one), names }));
 }
@@ -40,9 +57,21 @@ function withSavedSettings(plugin: Plugin, installed: Plugin[]): Plugin {
   return old ? { ...plugin, ...carryOverSettings(old, plugin) } : plugin;
 }
 
+/** The content column: 16px gutters on phones; on wide screens 24px gutters, at most 760 wide and centred. */
+function useColumn() {
+  const { width } = useWindowDimensions();
+  const wide = width >= WIDE_BREAKPOINT;
+  const gutter = wide ? SPACE[6] : SPACE[4];
+  const column: ViewStyle = { width: '100%', maxWidth: SIZE.contentMax + gutter * 2, alignSelf: 'center', paddingHorizontal: gutter };
+  return { wide, column };
+}
+
+type PressState = { pressed: boolean; hovered?: boolean };
+
 export default function PluginsScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const { wide, column } = useColumn();
   const { plugins, settings, installPlugin, updatePlugin, uninstallPlugin } = useStore();
   const [link, setLink] = useState('');
   const [inspecting, setInspecting] = useState(false);
@@ -56,7 +85,6 @@ export default function PluginsScreen() {
   const [entryErrors, setEntryErrors] = useState<Record<string, string>>({});
 
   const token = settings.githubToken || undefined;
-  const input = [styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }];
 
   const inspect = async () => {
     const value = link.trim();
@@ -156,32 +184,54 @@ export default function PluginsScreen() {
   const entries = (market?.entries ?? []).filter(
     (e) => !q || [e.name, e.displayName, e.description, e.category].some((s) => s?.toLowerCase().includes(q)),
   );
+  const buttonSize = wide ? 'md' : 'lg';
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <KeyboardAwareScrollView contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
-        <ScreenIntro title="Plugins">
-          Add skills, commands, agents and tools in one install. Works with Claude Code plugins and marketplaces on GitHub.
-        </ScreenIntro>
+      <KeyboardAwareScrollView contentContainerStyle={[column, styles.page]} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
+        <ScreenIntro title="Plugins">Works with Claude Code plugins and marketplaces on GitHub.</ScreenIntro>
 
-        <Pressable
-          onPress={() => router.push('/store')}
-          style={[styles.storeCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
-          accessibilityRole="button"
-        >
-          <IconTile name="shopping-bag" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>Browse the Store</Text>
-            <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
-              Anthropic’s marketplaces, skills and the MCP Registry
-            </Text>
-          </View>
-          <Icon name="chevron-right" size={16} />
-        </Pressable>
+        {plugins.length > 0 ? (
+          <>
+            <SectionLabel style={styles.firstLabel}>Installed</SectionLabel>
+            <View style={styles.list}>
+              {plugins.map((p) => (
+                <InstalledCard key={p.id} plugin={p} onToggle={(enabled) => updatePlugin({ ...p, enabled })} />
+              ))}
+            </View>
+
+            <SectionLabel>More plugins</SectionLabel>
+            <Pressable
+              onPress={() => router.push('/store')}
+              accessibilityRole="button"
+              accessibilityLabel="Browse the Store"
+              accessibilityHint="Anthropic’s marketplaces, skills and the MCP Registry"
+              style={({ pressed, hovered }: PressState) => [
+                styles.storeCard,
+                { backgroundColor: pressed || hovered ? theme.fill : theme.surface, borderColor: theme.border },
+              ]}
+            >
+              <IconTile name="package" />
+              <View style={styles.cardText}>
+                <Text style={[styles.cardTitle, { color: theme.ink }]}>Browse the Store</Text>
+                <Text style={[TYPE.caption, { color: theme.inkMuted }]}>Anthropic’s marketplaces, skills and the MCP Registry</Text>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.inkFaint} />
+            </Pressable>
+          </>
+        ) : (
+          <EmptyState
+            icon="layers"
+            title="No plugins yet"
+            action={<PillButton title="Browse the Store" icon="package" onPress={() => router.push('/store')} />}
+          >
+            Add skills, commands, agents and tools in one install.
+          </EmptyState>
+        )}
 
         <SectionLabel>Add from GitHub</SectionLabel>
-        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-          <TextInput
+        <View style={styles.formRow}>
+          <TextField
             value={link}
             onChangeText={(v) => {
               setLink(v);
@@ -189,103 +239,59 @@ export default function PluginsScreen() {
             }}
             onSubmitEditing={inspect}
             placeholder="github.com/owner/plugin-or-marketplace"
-            placeholderTextColor={theme.faint}
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="url"
             returnKeyType="go"
             editable={!inspecting}
             accessibilityLabel="Plugin or marketplace link"
-            style={[input, { flex: 1 }]}
+            error={error}
+            style={styles.flex1}
           />
-          <PillButton title="Install" onPress={inspect} loading={inspecting} disabled={!link.trim()} />
+          <PillButton title="Install" variant="secondary" onPress={inspect} loading={inspecting} disabled={!link.trim()} style={styles.formButton} />
         </View>
-        {inspecting && <Text style={{ color: theme.muted, fontSize: 13, marginTop: 8 }}>Looking at the repository…</Text>}
-        {!!error && (
-          <View style={styles.errorRow}>
-            <Icon name="alert-circle" size={16} color={theme.danger} />
-            <Text style={{ color: theme.danger, fontSize: 13, flex: 1 }}>{error}</Text>
-          </View>
-        )}
+        {inspecting && <Text style={[TYPE.caption, styles.noteSm, { color: theme.inkMuted }]}>Looking at the repository…</Text>}
         {!settings.githubToken && (
-          <Text style={{ color: theme.faint, fontSize: 12, marginTop: 8 }}>
-            Private repos need a GitHub token in Settings → Connections.
-          </Text>
-        )}
-
-        <SectionLabel>Installed</SectionLabel>
-        {plugins.length > 0 ? (
-          <Card>
-            {plugins.map((p, i) => {
-              const needsSetup = missingConfig(p).length > 0;
-              const name = p.displayName ?? p.name;
-              return (
-                <View key={p.id}>
-                  {i > 0 && <Divider />}
-                  <View style={styles.row}>
-                    <Pressable
-                      onPress={() => openPlugin(p.id)}
-                      style={({ pressed }) => [styles.rowMain, pressed && { opacity: 0.6 }]}
-                      accessibilityRole="button"
-                      accessibilityHint="Opens the plugin"
-                    >
-                      <IconTile name="package" />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }} numberOfLines={1}>
-                          {name}
-                        </Text>
-                        {!!p.description && (
-                          <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }} numberOfLines={2}>
-                            {p.description}
-                          </Text>
-                        )}
-                        <Text style={{ color: theme.faint, fontSize: 12, marginTop: 3 }} numberOfLines={1}>
-                          {metaLine(p)}
-                        </Text>
-                        {needsSetup && (
-                          <Text style={{ color: theme.primary, fontSize: 12, fontWeight: '600', marginTop: 3 }}>Needs setup</Text>
-                        )}
-                      </View>
-                    </Pressable>
-                    <ClaySwitch value={p.enabled} onValueChange={(enabled) => updatePlugin({ ...p, enabled })} label={`Use ${name}`} />
-                  </View>
-                </View>
-              );
-            })}
-          </Card>
-        ) : (
-          <Card style={{ padding: 16 }}>
-            <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>No plugins yet</Text>
-            <Text style={{ color: theme.muted, fontSize: 14, lineHeight: 20, marginTop: 4 }}>
-              Paste a link to a plugin or a plugin marketplace above. Its skills, slash commands, agents and MCP tools show up in
-              your chats.
-            </Text>
-          </Card>
+          <Text style={[TYPE.caption, styles.noteSm, { color: theme.inkFaint }]}>Private repos need a GitHub token in Settings → Connections.</Text>
         )}
       </KeyboardAwareScrollView>
 
-      {/* Confirm a single plugin */}
-      <Modal visible={!!pending} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={() => setPending(null)}>
-        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+      {/* Confirm a single plugin: a sheet on phones, a centred dialog on wide screens */}
+      <Modal
+        visible={!!pending}
+        transparent
+        animationType={wide ? 'fade' : 'slide'}
+        statusBarTranslucent
+        navigationBarTranslucent
+        onRequestClose={() => setPending(null)}
+      >
+        <View style={[styles.backdrop, wide && styles.backdropWide]}>
           <Pressable
-            style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(20,20,19,0.45)' }]}
+            style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }]}
             onPress={() => setPending(null)}
             accessibilityRole="button"
             accessibilityLabel="Cancel"
           />
           {pending && (
-            <View style={[styles.sheet, { backgroundColor: theme.bg, paddingBottom: insets.bottom + 16 }]}>
-              <View style={[styles.grabber, { backgroundColor: theme.oat }]} />
-              <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ paddingBottom: 8 }}>
+            <View
+              style={[
+                wide ? styles.dialog : [styles.sheet, { paddingBottom: insets.bottom + SPACE[4] }],
+                { backgroundColor: theme.surfaceRaised },
+                shadow(theme, 'sheet'),
+              ]}
+            >
+              {!wide && <View style={[styles.grabber, { backgroundColor: theme.borderStrong }]} />}
+              <ScrollView style={styles.sheetScroll} contentContainerStyle={{ paddingBottom: SPACE[2] }}>
                 <PluginSummary plugin={pending} installed={plugins} />
               </ScrollView>
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-                <PillButton title="Cancel" variant="secondary" onPress={() => setPending(null)} style={{ flex: 1 }} />
+              <View style={[styles.actions, wide && styles.actionsWide]}>
+                <PillButton title="Cancel" variant="secondary" size={buttonSize} onPress={() => setPending(null)} style={!wide && styles.flex1} />
                 <PillButton
                   title={plugins.some((p) => p.id === pending.id) ? 'Update' : 'Install'}
                   icon="download"
+                  size={buttonSize}
                   onPress={confirmInstall}
-                  style={{ flex: 1 }}
+                  style={!wide && styles.flex1}
                 />
               </View>
             </View>
@@ -298,46 +304,39 @@ export default function PluginsScreen() {
         {market && (
           <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top + 4 }}>
             <View style={styles.modalHeader}>
-              <Pressable onPress={closeMarket} hitSlop={10} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel="Close">
-                <Icon name="x" size={22} color={theme.text} />
-              </Pressable>
-              <Text style={{ color: theme.text, fontSize: 17, fontWeight: '600' }}>Marketplace</Text>
-              <View style={styles.headerBtn} />
+              <IconButton name="x" label="Close" onPress={closeMarket} />
+              <Text style={[TYPE.headline, { color: theme.ink }]}>Marketplace</Text>
+              <View style={styles.headerSpacer} />
             </View>
 
-            <View style={{ paddingHorizontal: 20 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 }}>
-                <IconTile name="shopping-bag" size={44} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 24, lineHeight: 30 }} numberOfLines={2}>
+            <View style={column}>
+              <View style={styles.marketHead}>
+                <IconTile name="shopping-bag" size={48} />
+                <View style={styles.flex1}>
+                  <Text style={[TYPE.title, { color: theme.ink }]} numberOfLines={2}>
                     {market.name}
                   </Text>
-                  <Text style={{ color: theme.muted, fontSize: 13 }} numberOfLines={1}>
+                  <Text style={[TYPE.caption, { color: theme.inkMuted }]} numberOfLines={1}>
                     {[market.owner && `By ${market.owner}`, plural(market.entries.length, 'plugin')].filter(Boolean).join(' · ')}
                   </Text>
                 </View>
               </View>
               {!!market.description && (
-                <Text style={{ color: theme.muted, fontSize: 14, lineHeight: 20, marginTop: 10 }} numberOfLines={3}>
+                <Text style={[styles.lede, { color: theme.inkMuted, marginTop: SPACE[3] }]} numberOfLines={3}>
                   {market.description}
                 </Text>
               )}
-              <View style={[styles.search, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <Icon name="search" size={17} color={theme.faint} />
-                <TextInput
+              <View style={styles.searchWrap}>
+                <SearchField
                   value={query}
                   onChangeText={setQuery}
                   placeholder="Search plugins"
-                  placeholderTextColor={theme.faint}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="search"
                   accessibilityLabel="Search plugins"
-                  style={{ flex: 1, color: theme.text, fontSize: 15, minHeight: 44 }}
+                  inputStyle={query ? styles.searchWithClear : undefined}
                 />
                 {!!query && (
-                  <Pressable onPress={() => setQuery('')} hitSlop={10} style={styles.clearBtn} accessibilityRole="button" accessibilityLabel="Clear search">
-                    <Icon name="x-circle" size={17} color={theme.faint} />
+                  <Pressable onPress={() => setQuery('')} style={styles.clear} accessibilityRole="button" accessibilityLabel="Clear search">
+                    <Icon name="x-circle" size={16} color={theme.inkFaint} />
                   </Pressable>
                 )}
               </View>
@@ -348,84 +347,144 @@ export default function PluginsScreen() {
               keyExtractor={(e) => e.name}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
-              contentContainerStyle={{ padding: 20, paddingTop: 14, paddingBottom: insets.bottom + 24 }}
-              ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+              contentContainerStyle={[column, { paddingTop: SPACE[3], paddingBottom: insets.bottom + SPACE[6] }]}
+              ItemSeparatorComponent={Gap}
               ListEmptyComponent={
-                <Text style={{ color: theme.muted, fontSize: 14, textAlign: 'center', marginTop: 24 }}>
-                  {market.entries.length ? 'No plugins match your search.' : 'This marketplace has no plugins.'}
-                </Text>
+                market.entries.length ? (
+                  <EmptyState icon="search" title="No plugins match your search">
+                    Try another word.
+                  </EmptyState>
+                ) : (
+                  <EmptyState icon="shopping-bag" title="This marketplace has no plugins">
+                    Check back later, or try another marketplace.
+                  </EmptyState>
+                )
               }
               renderItem={({ item }) => {
                 const installed = installedFrom(market, item);
-                const busy = installingEntry === item.name;
                 const entryError = entryErrors[item.name];
                 const title = item.displayName ?? item.name;
                 return (
-                  <Card style={[{ padding: 14 }, !item.supported && { opacity: 0.6 }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }} numberOfLines={1}>
-                          {title}
-                        </Text>
-                        {!!item.version && (
-                          <Text style={{ color: theme.faint, fontSize: 12, fontFamily: 'monospace', marginTop: 2 }}>v{item.version}</Text>
-                        )}
-                      </View>
-                      {installed ? (
-                        <Pressable
-                          onPress={() => {
-                            closeMarket();
-                            openPlugin(installed.id);
-                          }}
-                          style={styles.installedBtn}
-                          accessibilityRole="button"
-                          accessibilityLabel={`${title} is installed. Open it`}
-                        >
-                          <Icon name="check" size={15} color={theme.accent} />
-                          <Text style={{ color: theme.muted, fontSize: 14, fontWeight: '600' }}>Installed</Text>
-                        </Pressable>
-                      ) : busy ? (
-                        <ActivityIndicator color={theme.primary} style={styles.installedBtn} />
-                      ) : item.supported ? (
-                        <PillButton
-                          title="Install"
-                          onPress={() => installEntry(item)}
-                          disabled={!!installingEntry}
-                          style={styles.smallPill}
-                        />
-                      ) : null}
-                    </View>
-                    {!!item.description && (
-                      <Text style={{ color: theme.muted, fontSize: 13, lineHeight: 18, marginTop: 6 }} numberOfLines={3}>
-                        {item.description}
+                  <View style={[styles.entry, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                    <IconTile name="layers" />
+                    <View style={styles.cardText}>
+                      <Text style={[styles.cardTitle, { color: theme.ink }]} numberOfLines={1}>
+                        {title}
                       </Text>
-                    )}
-                    {!!item.category && (
-                      <View style={{ flexDirection: 'row', marginTop: 8 }}>
-                        <Chip>{item.category}</Chip>
-                      </View>
-                    )}
-                    {!item.supported && (
-                      <View style={styles.noteRow}>
-                        <Icon name="slash" size={14} color={theme.faint} />
-                        <Text style={{ color: theme.faint, fontSize: 12, flex: 1 }}>
-                          Not available on mobile{item.reason ? `: ${item.reason}` : ''}
+                      {!!item.version && <Text style={[styles.mono, { color: theme.inkFaint }]}>v{item.version}</Text>}
+                      {!!item.description && (
+                        <Text style={[TYPE.caption, styles.gap2, { color: theme.inkMuted }]} numberOfLines={2}>
+                          {item.description}
                         </Text>
-                      </View>
-                    )}
-                    {!!entryError && (
-                      <View style={styles.noteRow}>
-                        <Icon name="alert-circle" size={14} color={theme.danger} />
-                        <Text style={{ color: theme.danger, fontSize: 12, flex: 1 }}>{entryError}</Text>
-                      </View>
-                    )}
-                  </Card>
+                      )}
+                      {!!item.category && (
+                        <View style={styles.chipRow}>
+                          <Chip>{item.category}</Chip>
+                        </View>
+                      )}
+                      {!item.supported && (
+                        <Note icon="slash" color={theme.inkFaint}>
+                          Not available on mobile{item.reason ? `: ${item.reason}` : ''}
+                        </Note>
+                      )}
+                      {!!entryError && (
+                        <Note icon="alert-circle" color={theme.danger}>
+                          {entryError}
+                        </Note>
+                      )}
+                    </View>
+                    {installed ? (
+                      <Pressable
+                        onPress={() => {
+                          closeMarket();
+                          openPlugin(installed.id);
+                        }}
+                        hitSlop={4}
+                        style={({ pressed, hovered }: PressState) => [styles.installed, (pressed || hovered) && { backgroundColor: theme.fill }]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${title} is installed. Open it`}
+                      >
+                        <Icon name="check" size={16} color={theme.success} />
+                        <Text style={[TYPE.caption, { color: theme.success }]}>Installed</Text>
+                        <Icon name="chevron-right" size={16} color={theme.inkFaint} />
+                      </Pressable>
+                    ) : item.supported ? (
+                      <PillButton
+                        title="Install"
+                        size="sm"
+                        variant="secondary"
+                        loading={installingEntry === item.name}
+                        disabled={!!installingEntry}
+                        onPress={() => installEntry(item)}
+                      />
+                    ) : null}
+                  </View>
                 );
               }}
             />
           </View>
         )}
       </Modal>
+    </View>
+  );
+}
+
+function Gap() {
+  return <View style={{ height: SPACE[2] }} />;
+}
+
+/** A small icon and a line of text under an item: why it can't be installed, or what went wrong. */
+function Note({ icon, color, children }: { icon: IconName; color: string; children: ReactNode }) {
+  return (
+    <View style={styles.noteRow}>
+      <Icon name={icon} size={14} color={color} style={styles.noteIcon} />
+      <Text style={[styles.small, styles.flex1, { color }]}>{children}</Text>
+    </View>
+  );
+}
+
+/** An installed plugin: the card opens it; the switch beside it turns it on or off. */
+function InstalledCard({ plugin: p, onToggle }: { plugin: Plugin; onToggle: (enabled: boolean) => void }) {
+  const theme = useTheme();
+  const name = p.displayName ?? p.name;
+  const needsSetup = missingConfig(p).length > 0;
+  const meta = [p.version && `v${p.version}`, pluginOrigin(p)].filter(Boolean).join(' · ');
+  return (
+    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <Pressable
+        onPress={() => openPlugin(p.id)}
+        style={({ pressed, hovered }: PressState) => [styles.cardMain, (pressed || hovered) && { backgroundColor: theme.fill }]}
+        accessibilityRole="button"
+        accessibilityLabel={needsSetup ? `${name}, needs setup` : name}
+        accessibilityHint="Opens the plugin"
+      >
+        <IconTile name="layers" />
+        <View style={styles.cardText}>
+          <Text style={[styles.cardTitle, { color: theme.ink }]} numberOfLines={1}>
+            {name}
+          </Text>
+          {!!meta && (
+            <Text style={[styles.mono, { color: theme.inkFaint }]} numberOfLines={1}>
+              {meta}
+            </Text>
+          )}
+          {!!p.description && (
+            <Text style={[TYPE.caption, styles.gap2, { color: theme.inkMuted }]} numberOfLines={2}>
+              {p.description}
+            </Text>
+          )}
+          <View style={styles.cardFoot}>
+            <Text style={[styles.small, styles.shrink, { color: theme.inkFaint }]} numberOfLines={1}>
+              {metaLine(p)}
+            </Text>
+            {needsSetup && <StatusBadge tone="warning">Needs setup</StatusBadge>}
+          </View>
+        </View>
+        <Icon name="chevron-right" size={16} color={theme.inkFaint} style={styles.chevron} />
+      </Pressable>
+      <View style={[styles.switchZone, { borderLeftColor: theme.border }]}>
+        <ClaySwitch value={p.enabled} onValueChange={onToggle} label={`Use ${name}`} />
+      </View>
     </View>
   );
 }
@@ -439,24 +498,22 @@ function PluginSummary({ plugin, installed }: { plugin: Plugin; installed: Plugi
 
   return (
     <View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <IconTile name="package" size={44} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 24, lineHeight: 30 }} numberOfLines={2}>
+      <View style={styles.marketHead}>
+        <IconTile name="layers" size={48} />
+        <View style={styles.flex1}>
+          <Text style={[TYPE.headline, { color: theme.ink }]} numberOfLines={2} accessibilityRole="header">
             {plugin.displayName ?? plugin.name}
           </Text>
           {(!!plugin.version || !!plugin.author) && (
-            <Text style={{ color: theme.muted, fontSize: 13 }} numberOfLines={1}>
+            <Text style={[TYPE.caption, { color: theme.inkMuted }]} numberOfLines={1}>
               {[plugin.version && `v${plugin.version}`, plugin.author && `By ${plugin.author}`].filter(Boolean).join(' · ')}
             </Text>
           )}
         </View>
       </View>
-      {!!plugin.description && (
-        <Text style={{ color: theme.muted, fontSize: 14, lineHeight: 20, marginTop: 10 }}>{plugin.description}</Text>
-      )}
+      {!!plugin.description && <Text style={[styles.lede, { color: theme.inkMuted, marginTop: SPACE[3] }]}>{plugin.description}</Text>}
       {reinstall && (
-        <Text style={{ color: theme.faint, fontSize: 13, marginTop: 8 }}>
+        <Text style={[TYPE.caption, styles.noteSm, { color: theme.inkFaint }]}>
           Already installed. Installing again updates it and keeps your settings.
         </Text>
       )}
@@ -466,12 +523,12 @@ function PluginSummary({ plugin, installed }: { plugin: Plugin; installed: Plugi
         <Card>
           {parts.map((part, i) => (
             <View key={part.label}>
-              {i > 0 && <Divider />}
+              {i > 0 && <Divider inset={44} />}
               <View style={styles.partRow}>
-                <Icon name={part.icon} size={18} color={theme.text} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.text, fontSize: 15 }}>{part.label}</Text>
-                  <Text style={{ color: theme.faint, fontSize: 12, fontFamily: 'monospace', marginTop: 2 }} numberOfLines={2}>
+                <Icon name={part.icon} size={16} />
+                <View style={styles.flex1}>
+                  <Text style={[TYPE.callout, { color: theme.ink }]}>{part.label}</Text>
+                  <Text style={[styles.mono, { color: theme.inkFaint }]} numberOfLines={2}>
                     {part.names.join(', ')}
                   </Text>
                 </View>
@@ -480,17 +537,17 @@ function PluginSummary({ plugin, installed }: { plugin: Plugin; installed: Plugi
           ))}
         </Card>
       ) : (
-        <Text style={{ color: theme.muted, fontSize: 14 }}>No skills, commands, agents or tools that work on a phone.</Text>
+        <Text style={[styles.lede, { color: theme.inkMuted }]}>No skills, commands, agents or tools that work on a phone.</Text>
       )}
 
       {plugin.unsupported.length > 0 && (
         <>
           <SectionLabel>Not available on mobile</SectionLabel>
-          <View style={{ gap: 6 }}>
+          <View style={styles.bullets}>
             {plugin.unsupported.map((u) => (
-              <View key={u} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Icon name="slash" size={14} color={theme.faint} />
-                <Text style={{ color: theme.muted, fontSize: 14, flex: 1 }}>{u}</Text>
+              <View key={u} style={styles.bullet}>
+                <Icon name="slash" size={14} color={theme.inkFaint} />
+                <Text style={[styles.lede, styles.flex1, { color: theme.inkMuted }]}>{u}</Text>
               </View>
             ))}
           </View>
@@ -500,18 +557,18 @@ function PluginSummary({ plugin, installed }: { plugin: Plugin; installed: Plugi
       {plugin.userConfig.length > 0 && (
         <>
           <SectionLabel>Settings it asks for</SectionLabel>
-          <View style={{ gap: 6 }}>
+          <View style={styles.bullets}>
             {plugin.userConfig.map((f) => (
-              <View key={f.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Icon name={f.sensitive ? 'lock' : 'sliders'} size={14} color={theme.faint} />
-                <Text style={{ color: theme.text, fontSize: 14, flex: 1 }} numberOfLines={1}>
+              <View key={f.key} style={styles.bullet}>
+                <Icon name={f.sensitive ? 'lock' : 'sliders'} size={14} color={theme.inkFaint} />
+                <Text style={[styles.lede, styles.flex1, { color: theme.ink }]} numberOfLines={1}>
                   {f.title || f.key}
                 </Text>
-                {f.required && <Text style={{ color: theme.primary, fontSize: 12, fontWeight: '600' }}>Required</Text>}
+                {f.required && <StatusBadge tone="neutral">Required</StatusBadge>}
               </View>
             ))}
           </View>
-          <Text style={{ color: theme.faint, fontSize: 12, marginTop: 8 }}>
+          <Text style={[TYPE.caption, styles.noteSm, { color: theme.inkFaint }]}>
             {missing.length ? 'You can fill these in after installing.' : 'Optional — you can change these after installing.'}
           </Text>
         </>
@@ -521,19 +578,54 @@ function PluginSummary({ plugin, installed }: { plugin: Plugin; installed: Plugi
 }
 
 const styles = StyleSheet.create({
-  storeCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 14, marginBottom: 4 },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 48 },
-  errorRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 64 },
-  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
-  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10 },
-  grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, marginBottom: 14 },
-  partRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10, minHeight: 52 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 8 },
-  headerBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingLeft: 12, marginTop: 14 },
-  clearBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  installedBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44, minWidth: 44, justifyContent: 'center' },
-  smallPill: { minHeight: 44, paddingHorizontal: 18 },
-  noteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8 },
+  flex1: { flex: 1 },
+  shrink: { flexShrink: 1 },
+  gap2: { marginTop: 2 },
+  page: { paddingTop: SPACE[2], paddingBottom: SPACE[12] },
+  firstLabel: { marginTop: 0 },
+  list: { gap: SPACE[2] },
+  noteSm: { marginTop: SPACE[2] },
+  lede: { fontSize: 14, lineHeight: 20 },
+  small: { fontSize: 12, lineHeight: 16 },
+  mono: { fontFamily: FONT.mono, fontSize: 12, lineHeight: 16 },
+  chevron: { alignSelf: 'center' },
+  card: { flexDirection: 'row', alignItems: 'stretch', borderRadius: RADIUS.md, borderWidth: 1, overflow: 'hidden' },
+  cardMain: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: SPACE[3], padding: SPACE[3] },
+  cardText: { flex: 1, minWidth: 0, gap: 2 },
+  cardTitle: { fontSize: 15, lineHeight: 21, fontWeight: '600' },
+  cardFoot: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: SPACE[2], marginTop: 4 },
+  switchZone: { justifyContent: 'center', paddingHorizontal: SPACE[3], borderLeftWidth: StyleSheet.hairlineWidth },
+  storeCard: { flexDirection: 'row', alignItems: 'center', gap: SPACE[3], padding: SPACE[3], borderRadius: RADIUS.md, borderWidth: 1 },
+  entry: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACE[3], padding: SPACE[3], borderRadius: RADIUS.md, borderWidth: 1 },
+  chipRow: { flexDirection: 'row', marginTop: 6 },
+  installed: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: SIZE.controlSm, paddingHorizontal: 8, borderRadius: RADIUS.pill },
+  noteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 6 },
+  noteIcon: { marginTop: 1 },
+  formRow: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACE[2] },
+  formButton: { minHeight: 48 },
+  backdrop: { flex: 1, justifyContent: 'flex-end' },
+  backdropWide: { justifyContent: 'center', alignItems: 'center', padding: SPACE[4] },
+  sheet: { maxHeight: '90%', borderTopLeftRadius: RADIUS.lg, borderTopRightRadius: RADIUS.lg, paddingHorizontal: SPACE[5], paddingTop: SPACE[2] },
+  dialog: {
+    width: '100%',
+    maxWidth: 440,
+    maxHeight: '90%',
+    borderRadius: RADIUS.lg,
+    paddingTop: SPACE[5],
+    paddingHorizontal: SPACE[6],
+    paddingBottom: SPACE[6],
+  },
+  grabber: { width: 36, height: 5, borderRadius: 3, alignSelf: 'center', marginBottom: SPACE[3] },
+  sheetScroll: { flexGrow: 0 },
+  actions: { flexDirection: 'row', gap: SPACE[2], paddingTop: SPACE[3] },
+  actionsWide: { justifyContent: 'flex-end' },
+  partRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE[3], paddingHorizontal: SPACE[4], paddingVertical: 10, minHeight: 52 },
+  bullets: { gap: SPACE[2] },
+  bullet: { flexDirection: 'row', alignItems: 'center', gap: SPACE[2] },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 4 },
+  headerSpacer: { width: SIZE.controlMd },
+  marketHead: { flexDirection: 'row', alignItems: 'center', gap: SPACE[3], marginTop: 4 },
+  searchWrap: { marginTop: SPACE[4] },
+  clear: { position: 'absolute', right: 0, top: 0, bottom: 0, width: SIZE.controlMd, alignItems: 'center', justifyContent: 'center' },
+  searchWithClear: { paddingRight: 32 },
 });

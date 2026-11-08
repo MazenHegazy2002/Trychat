@@ -1,20 +1,20 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Image, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, Image, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
-import { fileIcon, useFileUi } from '../components/FileCards';
+import { FileTile, fileTypeLabel, useFileUi } from '../components/FileCards';
 import type { FileExtraAction } from '../components/FileCards';
-import { Icon, ScreenIntro } from '../components/ui';
+import { EmptyState, IconButton, ScreenIntro, SearchField } from '../components/ui';
 import { formatSize } from '../lib/attachments';
 import { copyForAttachment } from '../lib/fileActions';
-import { fileGroup, typeLabel } from '../lib/fileKinds';
+import { fileGroup } from '../lib/fileKinds';
 import { listLibrary, queueAttachments, removeFromLibrary, subscribeLibrary } from '../lib/library';
 import type { LibraryFile } from '../lib/library';
 import { useStore } from '../lib/store';
-import { useTheme } from '../lib/theme';
+import { RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, useTheme } from '../lib/theme';
 import type { Attachment } from '../lib/types';
 import { displayUri } from '../lib/webFiles';
-import { Text, TextInput } from '../components/Text';
+import { Text } from '../components/Text';
 
 type Filter = 'all' | 'images' | 'documents' | 'friends';
 const FILTERS: [Filter, string][] = [
@@ -31,7 +31,7 @@ function matches(f: LibraryFile, filter: Filter): boolean {
   return true;
 }
 
-const ORIGIN: Record<string, string> = { assistant: 'From TryChat', upload: 'You sent', shared: 'From a friend', project: 'Project file' };
+const ORIGIN: Record<string, string> = { assistant: 'from TryChat', upload: 'from you', shared: 'from a friend', project: 'project file' };
 
 function when(ts: number): string {
   const d = new Date(ts);
@@ -42,6 +42,7 @@ function when(ts: number): string {
 
 export default function FilesScreen() {
   const theme = useTheme();
+  const wide = useWindowDimensions().width >= WIDE_BREAKPOINT;
   const store = useStore();
   const [files, setFiles] = useState<LibraryFile[] | null>(null);
   const [query, setQuery] = useState('');
@@ -82,38 +83,28 @@ export default function FilesScreen() {
 
   const q = query.trim().toLowerCase();
   const shown = useMemo(
-    () => (files ?? []).filter((f) => matches(f, filter) && (!q || f.name.toLowerCase().includes(q) || typeLabel(f.name, f.mimeType).toLowerCase().includes(q))),
+    () => (files ?? []).filter((f) => matches(f, filter) && (!q || f.name.toLowerCase().includes(q) || fileTypeLabel(f).toLowerCase().includes(q))),
     [files, filter, q],
   );
   const total = (files ?? []).reduce((n, f) => n + (f.size || 0), 0);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <FlatList keyboardDismissMode="on-drag"
+      <FlatList
+        keyboardDismissMode="on-drag"
         data={shown}
         keyExtractor={(f) => f.id}
-        contentContainerStyle={{ padding: 20, paddingBottom: 48 }}
+        contentContainerStyle={[styles.page, wide && styles.pageWide]}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
-          <View>
+          <View style={{ marginBottom: 12 }}>
             <ScreenIntro title="Files">Every file sent, received and shared, kept on this device.</ScreenIntro>
             {files !== null && (
-              <Text style={{ color: theme.muted, fontSize: 13, marginTop: -8, marginBottom: 12 }} accessibilityLabel="Storage used">
+              <Text style={[TYPE.caption, { color: theme.inkMuted, marginTop: -12, marginBottom: 16 }]} accessibilityLabel="Storage used">
                 {files.length} file{files.length === 1 ? '' : 's'} · {formatSize(total)} on this device
               </Text>
             )}
-            <View style={[styles.search, { backgroundColor: theme.surface2 }]}>
-              <Icon name="search" size={16} />
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search files"
-                placeholderTextColor={theme.faint}
-                style={{ flex: 1, color: theme.text, fontSize: 15, paddingVertical: 10 }}
-                accessibilityLabel="Search files"
-                autoCorrect={false}
-              />
-            </View>
+            <SearchField value={query} onChangeText={setQuery} placeholder="Search files" accessibilityLabel="Search files" />
             <View style={styles.filters} accessibilityRole="tablist">
               {FILTERS.map(([key, label]) => {
                 const on = filter === key;
@@ -121,11 +112,13 @@ export default function FilesScreen() {
                   <Pressable
                     key={key}
                     onPress={() => setFilter(key)}
-                    style={[styles.filter, { backgroundColor: on ? theme.text : theme.surface, borderColor: on ? theme.text : theme.border }]}
+                    hitSlop={{ top: 4, bottom: 4 }}
+                    style={[styles.filter, { backgroundColor: on ? theme.accentSoft : theme.fill }]}
                     accessibilityRole="tab"
+                    accessibilityLabel={label}
                     accessibilityState={{ selected: on }}
                   >
-                    <Text style={{ color: on ? theme.bg : theme.text, fontSize: 13, fontWeight: '500' }}>{label}</Text>
+                    <Text style={[TYPE.subhead, { color: on ? theme.ink : theme.inkMuted }, on && { fontWeight: '600' }]}>{label}</Text>
                   </Pressable>
                 );
               })}
@@ -133,45 +126,43 @@ export default function FilesScreen() {
           </View>
         }
         ListEmptyComponent={
-          files === null ? null : (
-            <View style={[styles.empty, { borderColor: theme.border }]}>
-              <Icon name="folder" size={24} />
-              <Text style={{ color: theme.muted, textAlign: 'center', marginTop: 8 }}>
-                {files.length
-                  ? 'No files match.'
-                  : 'No files yet. Ask TryChat for a PDF, a chart or any file, or attach one in a chat — they’ll all show up here.'}
-              </Text>
-            </View>
+          files === null ? null : files.length ? (
+            <EmptyState icon="search" title="No files match">
+              Try another name or filter.
+            </EmptyState>
+          ) : (
+            <EmptyState icon="folder" title="No files yet">
+              Ask TryChat for a PDF, a spreadsheet or any file, or attach one in a chat. They all show up here.
+            </EmptyState>
           )
         }
-        ItemSeparatorComponent={() => <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: theme.border, marginLeft: 64 }} />}
+        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
         renderItem={({ item }) => (
           <Pressable
             onPress={() => open(item)}
             onLongPress={() => showMenu(item)}
-            style={({ pressed }) => [styles.row, pressed && { backgroundColor: theme.surface2 }]}
+            style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+              styles.row,
+              { backgroundColor: pressed || hovered ? theme.fill : theme.surface, borderColor: theme.border },
+            ]}
             accessibilityRole="button"
-            accessibilityLabel={`${item.name}, ${typeLabel(item.name, item.mimeType)}, ${formatSize(item.size)}`}
+            accessibilityLabel={`${item.name}, ${fileTypeLabel(item)}, ${formatSize(item.size)}`}
             accessibilityHint="Opens the file. Long-press for more options."
           >
             {item.kind === 'image' ? (
-              <Image source={{ uri: displayUri(item.uri) }} style={[styles.thumb, { backgroundColor: theme.surface2 }]} />
+              <Image source={{ uri: displayUri(item.uri) }} style={[styles.thumb, { backgroundColor: theme.fill }]} />
             ) : (
-              <View style={[styles.thumb, styles.tile, { backgroundColor: theme.surface2 }]}>
-                <Icon name={fileIcon(item)} size={20} color={theme.text} />
-              </View>
+              <FileTile file={item} />
             )}
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }} numberOfLines={1}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[TYPE.callout, { color: theme.ink, fontWeight: '500' }]} numberOfLines={1}>
                 {item.name}
               </Text>
-              <Text style={{ color: theme.muted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-                {formatSize(item.size)} · {typeLabel(item.name, item.mimeType)} · {ORIGIN[item.origin ?? 'upload'] ?? ''} · {when(item.addedAt)}
+              <Text style={[TYPE.codeLabel, { color: theme.inkFaint, marginTop: 2 }]} numberOfLines={1}>
+                {fileTypeLabel(item)} · {formatSize(item.size)} · {ORIGIN[item.origin ?? 'upload'] ?? ''} · {when(item.addedAt)}
               </Text>
             </View>
-            <Pressable onPress={() => showMenu(item)} style={styles.more} accessibilityRole="button" accessibilityLabel={`Options for ${item.name}`}>
-              <Icon name="more-vertical" size={18} />
-            </Pressable>
+            <IconButton name="more-horizontal" label={`Options for ${item.name}`} onPress={() => showMenu(item)} />
           </Pressable>
         )}
       />
@@ -181,12 +172,10 @@ export default function FilesScreen() {
 }
 
 const styles = StyleSheet.create({
-  search: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, marginBottom: 12 },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  filter: { minHeight: 44, paddingHorizontal: 14, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth, justifyContent: 'center' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64, paddingVertical: 8, borderRadius: 8 },
-  thumb: { width: 48, height: 48, borderRadius: 10 },
-  tile: { alignItems: 'center', justifyContent: 'center' },
-  more: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  empty: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 16, padding: 24, alignItems: 'center', marginTop: 8 },
+  page: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 48 },
+  pageWide: { width: '100%', maxWidth: SIZE.contentMax, alignSelf: 'center', paddingHorizontal: 24, paddingTop: 28 },
+  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  filter: { minHeight: 36, paddingHorizontal: 14, borderRadius: RADIUS.pill, justifyContent: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64, paddingLeft: 12, paddingRight: 4, paddingVertical: 10, borderRadius: RADIUS.md, borderWidth: 1 },
+  thumb: { width: 40, height: 40, borderRadius: RADIUS.sm },
 });

@@ -11,15 +11,18 @@ import {
   ScrollView,
   StyleSheet,
   View,
+  useWindowDimensions,
 } from 'react-native';
+import type { ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AttachSheet, MessageAttachments, PendingAttachments } from '../../components/Attachments';
 import type { AttachSource } from '../../components/Attachments';
 import { FileCards } from '../../components/FileCards';
 import { KeyboardPadded } from '../../components/KeyboardPadded';
-import { Icon } from '../../components/ui';
-import { MONO, SlashMenu, isTypingSlashCommand } from '../../components/SlashMenu';
+import { Banner, Icon, IconButton, Mark, TextAction } from '../../components/ui';
+import type { IconName } from '../../components/ui';
+import { SlashMenu, isTypingSlashCommand } from '../../components/SlashMenu';
 import { pickFiles, pickImages, takePhoto, transcribeVoice, voiceAttachment } from '../../lib/attachments';
 import { takeQueuedAttachments } from '../../lib/library';
 import { VoiceRecorder } from '../../components/Voice';
@@ -31,7 +34,7 @@ import { TextPrompt } from '../../components/TextPrompt';
 import { resolveSlashCommand } from '../../lib/plugins';
 import { useStore } from '../../lib/store';
 import { githubConnected, laptopConnected } from '../../lib/tools';
-import { useTheme } from '../../lib/theme';
+import { FONT, RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, shadow, useTheme } from '../../lib/theme';
 import type { Attachment, ChatMessage } from '../../lib/types';
 import { Text, TextInput } from '../../components/Text';
 
@@ -46,6 +49,18 @@ const TOOL_SUGGESTIONS = [
   'List my GitHub repositories',
   'What files are in my project folder on my laptop?',
 ];
+
+const SUGGESTION_ICONS: Record<string, IconName> = {
+  'Build me a to-do list app': 'check-square',
+  'Make a snake game I can play': 'play',
+  'Remember that I prefer short answers': 'book-open',
+  'Explain how APIs work, simply': 'help-circle',
+  'List my GitHub repositories': 'github',
+  'What files are in my project folder on my laptop?': 'monitor',
+};
+
+/** Content column on wide screens: the transcript and composer centre at 760px with 24px gutters. */
+const WIDE_COLUMN: ViewStyle = { width: '100%', maxWidth: SIZE.contentMax, alignSelf: 'center', paddingHorizontal: 24 };
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -68,6 +83,9 @@ export default function ChatScreen() {
   const [attaching, setAttaching] = useState(false);
   const [recording, setRecording] = useState(false);
   const [sendingVoice, setSendingVoice] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const wide = useWindowDimensions().width >= WIDE_BREAKPOINT;
+  const column: ViewStyle = wide ? WIDE_COLUMN : styles.phoneColumn;
   // Composer keeps a constant bottom inset; the avoiding view subtracts it while the keyboard is up
   // (keyboard height already covers the nav bar), so nothing doubles and nothing jumps mid-animation.
   const composerBottom = Math.max(insets.bottom, 10);
@@ -76,7 +94,7 @@ export default function ChatScreen() {
   if (!conv) {
     return (
       <View style={[styles.center, { backgroundColor: theme.bg }]}>
-        <Text style={{ color: theme.muted }}>This chat no longer exists.</Text>
+        <Text style={[TYPE.callout, { color: theme.inkMuted }]}>This chat no longer exists.</Text>
       </View>
     );
   }
@@ -160,7 +178,7 @@ export default function ChatScreen() {
     if (item.toolResult) return null; // shown inside the tool card instead
     if (item.role === 'user') {
       return (
-        <Pressable onLongPress={() => onMessageLongPress(item)} style={styles.userRow}>
+        <Pressable onLongPress={() => onMessageLongPress(item)} style={[column, styles.userRow]}>
           {!!item.attachments?.length && <MessageAttachments items={item.attachments} />}
           {item.displayText ? (
             <View style={[styles.userBubble, { backgroundColor: theme.userBubble }]}>
@@ -168,7 +186,7 @@ export default function ChatScreen() {
             </View>
           ) : !!item.content && !item.attachments?.some((a) => a.voice?.transcriptError) && (
             <View style={[styles.userBubble, { backgroundColor: theme.userBubble }]}>
-              <Text selectable style={{ color: theme.onUserBubble, fontSize: 16, lineHeight: 22 }}>
+              <Text selectable style={[TYPE.body, { color: theme.ink }]}>
                 {item.content}
               </Text>
             </View>
@@ -178,7 +196,7 @@ export default function ChatScreen() {
     }
     const streaming = busy && item.id === lastAssistantId;
     return (
-      <Pressable onLongPress={() => onMessageLongPress(item)} style={styles.assistantRow}>
+      <Pressable onLongPress={() => onMessageLongPress(item)} style={[column, styles.assistantRow]}>
         {item.content ? <Markdown text={item.content} /> : null}
         {item.toolCall && (
           <ToolCallCard
@@ -190,28 +208,34 @@ export default function ChatScreen() {
         {!!item.toolCall?.files?.length && (
           <FileCards files={item.toolCall.files} conversationId={id} />
         )}
-        {streaming && !item.content && !item.toolCall && <ActivityIndicator color={theme.muted} style={{ alignSelf: 'flex-start' }} />}
+        {streaming && !item.content && !item.toolCall && <ActivityIndicator color={theme.inkMuted} style={{ alignSelf: 'flex-start' }} />}
         {!!item.error && (
-          <View style={[styles.error, { borderColor: theme.danger }]}>
-            <Text style={{ color: theme.danger }}>{item.error}</Text>
-            <Pressable onPress={() => store.regenerate(id)} hitSlop={8}>
-              <Text style={{ color: theme.primary, fontWeight: '600', marginTop: 6 }}>Retry</Text>
-            </Pressable>
+          <View style={[styles.error, { backgroundColor: theme.dangerSoft }]}>
+            <Icon name="alert-circle" size={20} color={theme.danger} style={{ marginTop: 12 }} />
+            <Text style={[styles.errorText, { color: theme.ink }]}>{item.error}</Text>
+            <TextAction title="Retry" onPress={() => store.regenerate(id)} />
           </View>
         )}
         {!streaming && !item.error && !item.toolCall && item.id === lastAssistantId && (
           <View style={styles.actions}>
-            <Pressable onPress={() => Clipboard.setStringAsync(item.content)} hitSlop={8}>
-              <Text style={{ color: theme.muted, fontSize: 13 }}>Copy</Text>
-            </Pressable>
-            <Pressable onPress={() => store.regenerate(id)} hitSlop={8}>
-              <Text style={{ color: theme.muted, fontSize: 13 }}>Regenerate</Text>
-            </Pressable>
+            <MessageAction icon="copy" label="Copy" onPress={() => Clipboard.setStringAsync(item.content)} />
+            <MessageAction icon="refresh-cw" label="Regenerate" onPress={() => store.regenerate(id)} />
           </View>
         )}
       </Pressable>
     );
   };
+
+  const suggestions = [
+    ...(githubConnected(store.settings) ? [TOOL_SUGGESTIONS[0]] : []),
+    ...(laptopConnected(store.settings) ? [TOOL_SUGGESTIONS[1]] : []),
+    ...SUGGESTIONS,
+  ].slice(0, 5);
+  // Two per row; an odd last card spans the row.
+  const suggestionRows: string[][] = [];
+  for (let i = 0; i < suggestions.length; i += 2) suggestionRows.push(suggestions.slice(i, i + 2));
+
+  const sendDisabled = !canSend || attaching;
 
   return (
     // Android draws edge-to-edge, so the window no longer shrinks for the keyboard: the screen pads itself by the
@@ -219,26 +243,56 @@ export default function ChatScreen() {
     <KeyboardPadded bottomInset={composerBottom - 8} style={{ backgroundColor: theme.bg }}>
       <Stack.Screen
         options={{
+          // On wide screens the sidebar handles navigation.
+          headerBackVisible: !wide,
           headerTitle: () => (
-            <Pressable onPress={() => setRenaming(true)} style={{ maxWidth: 220 }}>
-              <Text numberOfLines={1} style={{ color: theme.text, fontSize: 16, fontWeight: '700' }}>
-                {conv.title}
-              </Text>
-              <Text numberOfLines={1} style={{ color: theme.muted, fontSize: 11 }}>
-                {project ? project.name : model || 'no model'}
-              </Text>
-            </Pressable>
+            <View style={[styles.titleBlock, { maxWidth: wide ? 480 : 220 }, wide && styles.titleBlockWide]}>
+              <Pressable
+                onPress={() => setRenaming(true)}
+                accessibilityRole="button"
+                accessibilityLabel={conv.title}
+                accessibilityHint="Rename chat"
+                style={{ flexShrink: 1 }}
+              >
+                <Text numberOfLines={1} style={[styles.title, { color: theme.ink }]}>
+                  {conv.title}
+                </Text>
+              </Pressable>
+              <View style={styles.subtitle}>
+                {project && (
+                  <Text numberOfLines={1} style={[TYPE.caption, { color: theme.inkMuted, fontSize: 12, lineHeight: 16, flexShrink: 1 }]}>
+                    {project.name} ·
+                  </Text>
+                )}
+                <Pressable
+                  onPress={() => setPickerOpen(true)}
+                  hitSlop={{ top: 2, bottom: 10, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Choose model"
+                  accessibilityValue={{ text: model || 'None' }}
+                  style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                    styles.modelChip,
+                    wide && { backgroundColor: theme.fill, height: 28 },
+                    (pressed || hovered) && { backgroundColor: theme.fill },
+                  ]}
+                >
+                  <Text numberOfLines={1} style={[TYPE.codeLabel, { color: model ? theme.inkMuted : theme.danger, flexShrink: 1 }]}>
+                    {model || 'Choose model'}
+                  </Text>
+                  <Icon name="chevron-down" size={12} color={theme.inkMuted} />
+                </Pressable>
+              </View>
+            </View>
           ),
           headerRight: () => (
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <TasksPill conversationId={conv.id} hideWhenIdle />
-            <Pressable
-              onPress={() => setMoving(true)}
-              style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
-              accessibilityLabel={project ? `In project ${project.name}. Move to another project` : 'Move to project'}
-            >
-              <Icon name="folder" size={20} color={project ? theme.primary : theme.text} />
-            </Pressable>
+              <TasksPill conversationId={conv.id} hideWhenIdle />
+              <IconButton
+                name="folder"
+                onPress={() => setMoving(true)}
+                label={project ? `In project ${project.name}. Move to another project` : 'Move to project'}
+                color={project ? theme.ink : theme.inkMuted}
+              />
             </View>
           ),
         }}
@@ -246,42 +300,50 @@ export default function ChatScreen() {
 
       <View style={styles.flex}>
         {conv.messages.length === 0 ? (
-          <ScrollView contentContainerStyle={[styles.emptyState, { padding: 24 }]} keyboardShouldPersistTaps="handled">
-            <View style={[styles.mark, { backgroundColor: theme.accent }]}>
-              <Text style={{ color: '#FFFFFF', fontSize: 20, fontWeight: '700' }}>T</Text>
+          <ScrollView contentContainerStyle={[styles.emptyState, column]} keyboardShouldPersistTaps="handled">
+            <View style={styles.emptyInner}>
+              <View style={[styles.markTile, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <Mark size={40} />
+              </View>
+              <Text style={[TYPE.display, styles.greeting, { color: theme.ink }]} accessibilityRole="header">
+                {greeting()}
+                {store.account ? `, ${store.account.user.name}` : ''}
+              </Text>
+              <Text style={[TYPE.body, { color: theme.inkMuted, textAlign: 'center', maxWidth: 360 }]}>
+                Ask anything, build an app that runs right here, or save a memory.
+              </Text>
+              <View style={styles.suggestions}>
+                {suggestionRows.map((row) => (
+                  <View key={row.join('|')} style={styles.suggestionRow}>
+                    {row.map((s) => (
+                      <Pressable
+                        key={s}
+                        onPress={() => send(s)}
+                        accessibilityRole="button"
+                        accessibilityLabel={s}
+                        style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                          styles.suggestion,
+                          { backgroundColor: pressed || hovered ? theme.fill : theme.surface, borderColor: theme.border },
+                        ]}
+                      >
+                        <Icon name={SUGGESTION_ICONS[s] ?? 'message-circle'} size={16} color={theme.inkMuted} />
+                        <Text style={{ color: theme.ink, fontSize: 14, lineHeight: 20 }}>{s}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ))}
+              </View>
+              {store.commands.length > 0 && (
+                <Pressable onPress={startCommand} style={styles.hint} accessibilityRole="button" accessibilityLabel="Type slash to use plugin commands">
+                  <Text style={[TYPE.caption, { color: theme.inkMuted }]}>
+                    Type <Text style={[styles.inlineCode, { color: theme.ink, backgroundColor: theme.fill }]}> / </Text> to use plugin commands
+                  </Text>
+                </Pressable>
+              )}
+              {!model && (
+                <Banner tone="danger" title="No model selected — open Settings" onPress={() => router.push('/settings')} style={{ marginTop: 16, alignSelf: 'stretch' }} />
+              )}
             </View>
-            <Text style={{ color: theme.text, fontSize: 30, fontFamily: theme.serif, marginBottom: 8, textAlign: 'center' }}>
-              {greeting()}
-              {store.account ? `, ${store.account.user.name}` : ''}
-            </Text>
-            <Text style={{ color: theme.muted, textAlign: 'center', marginBottom: 20 }}>
-              Chat, ask for apps and games (they run right here), or tell me things to remember.
-            </Text>
-            {[
-              ...(githubConnected(store.settings) ? [TOOL_SUGGESTIONS[0]] : []),
-              ...(laptopConnected(store.settings) ? [TOOL_SUGGESTIONS[1]] : []),
-              ...SUGGESTIONS,
-            ].slice(0, 5).map((s) => (
-              <Pressable
-                key={s}
-                onPress={() => send(s)}
-                style={[styles.suggestion, { backgroundColor: theme.surface, borderColor: theme.border }]}
-              >
-                <Text style={{ color: theme.text }}>{s}</Text>
-              </Pressable>
-            ))}
-            {store.commands.length > 0 && (
-              <Pressable onPress={startCommand} style={styles.hint} accessibilityRole="button" accessibilityLabel="Type slash to use plugin commands">
-                <Text style={{ color: theme.muted, fontSize: 13 }}>
-                  Type <Text style={{ fontFamily: MONO, color: theme.text }}>/</Text> to use plugin commands
-                </Text>
-              </Pressable>
-            )}
-            {!model && (
-              <Pressable onPress={() => router.push('/settings')} style={{ marginTop: 16 }}>
-                <Text style={{ color: theme.danger }}>No model selected — open Settings</Text>
-              </Pressable>
-            )}
           </ScrollView>
         ) : (
           <FlatList
@@ -289,98 +351,111 @@ export default function ChatScreen() {
             data={[...conv.messages].reverse()}
             keyExtractor={(m) => m.id}
             renderItem={renderMessage}
-            contentContainerStyle={{ paddingVertical: 12 }}
+            contentContainerStyle={{ paddingVertical: 16 }}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
           />
         )}
         {slashOpen && (
           // Floats over the bottom of the conversation, just above the composer, and rises with the keyboard.
-          <View style={styles.slashLayer}>
+          <View style={[styles.slashLayer, wide && { left: 24, right: 24 }]}>
             <SlashMenu
               query={input.slice(1)}
               commands={store.commands}
               onSelect={pickCommand}
               onOpenPlugins={() => router.push('/plugins')}
+              style={wide ? styles.wideInner : undefined}
             />
           </View>
         )}
       </View>
 
-      <View style={[styles.composerWrap, { paddingBottom: composerBottom }]}>
-        <View style={[styles.composer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <View style={[styles.composerWrap, wide && { paddingHorizontal: 24 }, { paddingBottom: composerBottom }]}>
+        <View
+          style={[
+            styles.composer,
+            wide && styles.wideInner,
+            { backgroundColor: theme.surfaceRaised, borderColor: focused ? theme.accent : theme.border },
+            shadow(theme, focused ? 'glow' : 'raised'),
+          ]}
+        >
           <PendingAttachments items={pending} onRemove={(aid) => setPending((p) => p.filter((x) => x.id !== aid))} />
-          <TextInput
-            ref={inputRef}
-            value={input}
-            onChangeText={setInput}
-            placeholder={conv.messages.length ? 'Reply to TryChat' : 'How can I help you today?'}
-            placeholderTextColor={theme.faint}
-            multiline
-            onKeyPress={(e) => {
-              // Desktop/web: Enter sends, Shift+Enter adds a newline. Phones keep Return = newline.
-              const ne = e.nativeEvent as { key: string; shiftKey?: boolean };
-              if (Platform.OS === 'web' && ne.key === 'Enter' && !ne.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            style={[styles.input, { color: theme.text }]}
-            accessibilityLabel="Message"
-            testID="composer"
-          />
-          {recording ? (
-            <VoiceRecorder onCancel={() => setRecording(false)} onSend={sendVoice} sending={sendingVoice} />
-          ) : (
           <View style={styles.composerRow}>
-            <Pressable
-              onPress={() => setAttachOpen(true)}
-              disabled={attaching}
-              style={[styles.roundBtn, { borderColor: theme.border }]}
-              accessibilityLabel="Attach photos or files"
-              hitSlop={4}
-            >
-              {attaching ? <ActivityIndicator size="small" color={theme.muted} /> : <Icon name="plus" size={20} color={theme.text} />}
-            </Pressable>
-            <Pressable onPress={() => setPickerOpen(true)} style={styles.modelChip} accessibilityLabel="Choose model" hitSlop={4}>
-              <Text style={{ color: theme.muted, fontSize: 13 }} numberOfLines={1}>
-                {model || 'Choose model'}
-              </Text>
-              <Icon name="chevron-down" size={14} />
-            </Pressable>
-            <View style={{ flex: 1 }} />
-            {busy ? (
+            {!recording && (
               <Pressable
-                onPress={() => store.stop(id)}
-                style={[styles.sendBtn, { backgroundColor: theme.text }]}
-                accessibilityLabel="Stop generating"
-              >
-                <Icon name="square" size={14} color={theme.bg} />
-              </Pressable>
-            ) : !canSend ? (
-              <Pressable
-                onPress={() => setRecording(true)}
+                onPress={() => setAttachOpen(true)}
                 disabled={attaching}
-                style={[styles.sendBtn, { backgroundColor: theme.surface2 }]}
+                style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                  styles.roundBtn,
+                  (pressed || hovered) && { backgroundColor: theme.fill },
+                ]}
                 accessibilityRole="button"
-                accessibilityLabel="Record voice message"
-                hitSlop={4}
+                accessibilityLabel="Attach photos or files"
+                accessibilityState={{ disabled: attaching, busy: attaching }}
               >
-                <Icon name="mic" size={20} color={theme.text} />
-              </Pressable>
-            ) : (
-              <Pressable
-                onPress={() => send()}
-                disabled={!canSend || attaching}
-                style={[styles.sendBtn, { backgroundColor: canSend ? theme.accent : theme.surface2 }]}
-                accessibilityLabel="Send"
-              >
-                <Icon name="arrow-up" size={20} color={canSend ? '#FFFFFF' : theme.faint} />
+                {attaching ? <ActivityIndicator size="small" color={theme.inkMuted} /> : <Icon name="plus" size={20} color={theme.inkMuted} />}
               </Pressable>
             )}
+            <TextInput
+              ref={inputRef}
+              value={input}
+              onChangeText={setInput}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder={conv.messages.length ? 'Reply to TryChat' : 'How can I help you today?'}
+              multiline
+              onKeyPress={(e) => {
+                // Desktop/web: Enter sends, Shift+Enter adds a newline. Phones keep Return = newline.
+                const ne = e.nativeEvent as { key: string; shiftKey?: boolean };
+                if (Platform.OS === 'web' && ne.key === 'Enter' && !ne.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              style={[styles.input, { color: theme.ink }, slashOpen && { fontFamily: FONT.mono, fontSize: 15 }]}
+              accessibilityLabel="Message"
+              testID="composer"
+            />
+            {!recording && (
+              <IconButton name="mic" label="Record voice message" onPress={() => setRecording(true)} disabled={attaching || busy} />
+            )}
+            {!recording &&
+              (busy ? (
+                <Pressable
+                  onPress={() => store.stop(id)}
+                  hitSlop={2}
+                  style={[styles.sendBtn, { backgroundColor: theme.ink }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop generating"
+                >
+                  <View style={[styles.stopSquare, { backgroundColor: theme.onAccent }]} />
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={() => send()}
+                  disabled={sendDisabled}
+                  hitSlop={2}
+                  style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                    styles.sendBtn,
+                    sendDisabled
+                      ? { backgroundColor: theme.fill }
+                      : [{ backgroundColor: pressed ? theme.accentPress : hovered ? theme.accentHover : theme.accent }, shadow(theme, 'glow')],
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Send"
+                  accessibilityState={{ disabled: sendDisabled }}
+                >
+                  <Icon name="arrow-up" size={22} color={sendDisabled ? theme.inkFaint : theme.onAccent} />
+                </Pressable>
+              ))}
           </View>
+          {recording && (
+            <VoiceRecorder onCancel={() => setRecording(false)} onSend={sendVoice} sending={sendingVoice} />
           )}
         </View>
+        {wide && Platform.OS === 'web' && (
+          <Text style={[styles.keysHint, { color: theme.inkFaint }]}>Enter sends · Shift+Enter makes a new line</Text>
+        )}
       </View>
 
       <AttachSheet visible={attachOpen} onClose={() => setAttachOpen(false)} onPick={attach} />
@@ -402,6 +477,30 @@ export default function ChatScreen() {
   );
 }
 
+/** Copy / Regenerate under the last reply: faint until hovered or pressed. */
+function MessageAction({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={{ top: 6, bottom: 6 }}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.action,
+        (pressed || hovered) && { backgroundColor: theme.fill },
+      ]}
+    >
+      {({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => (
+        <>
+          <Icon name={icon} size={16} color={pressed || hovered ? theme.ink : theme.inkFaint} />
+          <Text style={{ color: pressed || hovered ? theme.ink : theme.inkFaint, fontSize: 13, lineHeight: 18, fontWeight: '500' }}>{label}</Text>
+        </>
+      )}
+    </Pressable>
+  );
+}
+
 /** A user bubble for a slash command: the command token in mono under a tiny "command" label. */
 function CommandText({ text }: { text: string }) {
   const theme = useTheme();
@@ -409,13 +508,13 @@ function CommandText({ text }: { text: string }) {
   return (
     <View>
       <View style={styles.commandLabel}>
-        <Icon name="terminal" size={11} color={theme.muted} />
-        <Text style={{ color: theme.muted, fontSize: 11 }}>command</Text>
+        <Icon name="terminal" size={12} color={theme.inkMuted} />
+        <Text style={{ color: theme.inkMuted, fontSize: 12, lineHeight: 16 }}>command</Text>
       </View>
-      <Text selectable style={{ color: theme.onUserBubble, fontSize: 16, lineHeight: 22 }}>
+      <Text selectable style={[TYPE.body, { color: theme.ink }]}>
         {m ? (
           <>
-            <Text style={{ fontFamily: MONO, fontSize: 15 }}>{m[1]}</Text>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 15 }}>{m[1]}</Text>
             {m[2]}
           </>
         ) : (
@@ -429,15 +528,35 @@ function CommandText({ text }: { text: string }) {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  emptyState: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
-  mark: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  userRow: { alignItems: 'flex-end', paddingHorizontal: 12, marginVertical: 6 },
-  userBubble: { maxWidth: '85%', borderRadius: 18, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 9 },
-  assistantRow: { paddingHorizontal: 16, marginVertical: 8 },
-  error: { borderWidth: 1, borderRadius: 10, padding: 10, marginTop: 6 },
-  actions: { flexDirection: 'row', gap: 18, marginTop: 8 },
-  suggestion: { width: '100%', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 8 },
-  hint: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8, marginTop: 4 },
+  phoneColumn: { paddingHorizontal: 16 },
+  wideInner: { width: '100%', maxWidth: SIZE.contentMax - 48, alignSelf: 'center' },
+  titleBlock: { alignItems: 'center' },
+  titleBlockWide: { flexDirection: 'row', gap: 10 },
+  title: { fontSize: 15, lineHeight: 20, fontWeight: '600' },
+  subtitle: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: '100%' },
+  modelChip: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 20, paddingHorizontal: 8, borderRadius: RADIUS.pill, flexShrink: 1 },
+  emptyState: { flexGrow: 1, justifyContent: 'center', paddingVertical: 32 },
+  emptyInner: { width: '100%', maxWidth: 560, alignSelf: 'center', alignItems: 'center', gap: 12 },
+  markTile: { width: 64, height: 64, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  greeting: { textAlign: 'center', marginTop: 8 },
+  suggestions: { alignSelf: 'stretch', gap: 8, marginTop: 16 },
+  suggestionRow: { flexDirection: 'row', gap: 8 },
+  suggestion: { flex: 1, minHeight: 72, gap: 8, padding: 12, borderRadius: RADIUS.md, borderWidth: 1 },
+  hint: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
+  inlineCode: { fontFamily: FONT.mono, borderRadius: RADIUS.xs },
+  userRow: { alignItems: 'flex-end', marginVertical: 10 },
+  userBubble: {
+    maxWidth: '85%',
+    borderRadius: RADIUS.lg,
+    borderBottomRightRadius: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  assistantRow: { marginVertical: 10 },
+  error: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, borderRadius: RADIUS.md, paddingLeft: 12, paddingRight: 8, marginTop: 8 },
+  errorText: { flex: 1, fontSize: 14, lineHeight: 20, paddingVertical: 12 },
+  actions: { flexDirection: 'row', gap: 4, marginTop: 8, marginLeft: -10 },
+  action: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 10, borderRadius: RADIUS.pill },
   slashLayer: {
     position: 'absolute',
     left: 12,
@@ -448,12 +567,23 @@ const styles = StyleSheet.create({
     pointerEvents: 'box-none',
   },
   commandLabel: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
-  composerWrap: { paddingHorizontal: 12, paddingTop: 6 },
-  composer: { borderWidth: 1, borderRadius: 24, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 8 },
+  composerWrap: { paddingHorizontal: 12, paddingTop: 8, gap: 8 },
+  composer: { borderWidth: 1, borderRadius: RADIUS.lg, padding: 4 },
+  composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 2 },
   // The composer card already shows focus; drop the browser's focus rectangle on web/desktop.
-  input: { maxHeight: 160, minHeight: 40, fontSize: 16, paddingHorizontal: 4, paddingVertical: 8, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null) },
-  composerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  roundBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  modelChip: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 40, maxWidth: 170, paddingHorizontal: 6 },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  input: {
+    flex: 1,
+    minWidth: 0,
+    maxHeight: 160,
+    minHeight: 44,
+    fontSize: 16,
+    paddingHorizontal: 4,
+    paddingTop: 12,
+    paddingBottom: 12,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null),
+  },
+  roundBtn: { width: SIZE.controlMd, height: SIZE.controlMd, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center' },
+  sendBtn: { width: 40, height: 40, margin: 2, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center' },
+  stopSquare: { width: 12, height: 12, borderRadius: 3 },
+  keysHint: { fontSize: 12, lineHeight: 16, textAlign: 'center' },
 });

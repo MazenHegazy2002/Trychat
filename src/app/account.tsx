@@ -1,16 +1,33 @@
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Card, Divider, Icon, PillButton, SectionLabel } from '../components/ui';
-import type { IconName } from '../components/ui';
+import { Text } from '../components/Text';
+import {
+  Banner,
+  Card,
+  Divider,
+  Icon,
+  ListRow,
+  PillButton,
+  SectionLabel,
+  SegmentedControl,
+  StatusBadge,
+  TextAction,
+  TextField,
+} from '../components/ui';
 import * as storage from '../lib/storage';
 import { useStore } from '../lib/store';
-import { useTheme } from '../lib/theme';
-import { Text, TextInput } from '../components/Text';
+import { FONT, RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, useTheme } from '../lib/theme';
 
 const DEFAULT_SERVER = process.env.EXPO_PUBLIC_SYNC_SERVER_URL ?? 'http://169.58.133.158:8787';
+
+const MODES = [
+  { value: 'signin', label: 'Sign in' },
+  { value: 'signup', label: 'Create account' },
+] as const;
 
 function timeAgo(ts?: number) {
   if (!ts) return 'not yet';
@@ -23,6 +40,21 @@ function timeAgo(ts?: number) {
 
 const hostOf = (url: string) => url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
 
+/** Phone gutters; on wide screens a centred column with 24px gutters. */
+function usePageStyle(maxWidth: number) {
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const wide = width >= WIDE_BREAKPOINT;
+  return {
+    width: '100%' as const,
+    maxWidth,
+    alignSelf: 'center' as const,
+    paddingHorizontal: wide ? 24 : 16,
+    paddingTop: wide ? 32 : 8,
+    paddingBottom: insets.bottom + 24,
+  };
+}
+
 export default function AccountScreen() {
   const { account } = useStore();
   return account ? <SignedIn /> : <SignInForm />;
@@ -30,9 +62,12 @@ export default function AccountScreen() {
 
 function SignedIn() {
   const theme = useTheme();
+  const page = usePageStyle(SIZE.contentMax);
   const { account, signOut, syncNow, syncStatus, memories, conversations, skills } = useStore();
   if (!account) return null;
   const initial = (account.user.name || account.user.email)[0]?.toUpperCase();
+  const syncing = syncStatus.state === 'syncing';
+  const failed = syncStatus.state === 'error';
 
   const stats: [number, string][] = [
     [memories.length, 'Memories'],
@@ -41,82 +76,100 @@ function SignedIn() {
   ];
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
+    <KeyboardAwareScrollView
+      style={{ backgroundColor: theme.bg }}
+      contentContainerStyle={page}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+    >
       <Stack.Screen options={{ title: 'Account' }} />
-      <View style={{ alignItems: 'center', marginBottom: 24 }}>
-        <View style={[styles.avatar, { backgroundColor: theme.oat }]}>
-          <Text style={{ color: theme.text, fontSize: 28, fontFamily: theme.serif }}>{initial}</Text>
+      <View style={styles.profile}>
+        <View style={[styles.avatar, { backgroundColor: theme.accentSoft }]}>
+          <Text style={[TYPE.title, { color: theme.accent }]}>{initial}</Text>
         </View>
-        <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 26, marginTop: 12 }}>{account.user.name}</Text>
-        <Text style={{ color: theme.muted, fontSize: 15, marginTop: 2 }}>{account.user.email}</Text>
+        {!!account.user.name && (
+          <Text style={[TYPE.title, { color: theme.ink, textAlign: 'center' }]} numberOfLines={1}>
+            {account.user.name}
+          </Text>
+        )}
+        <Text style={[TYPE.callout, { color: theme.inkMuted, textAlign: 'center' }]} numberOfLines={1}>
+          {account.user.email}
+        </Text>
       </View>
 
-      <Card style={{ padding: 16 }}>
-        <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600' }}>Synced to your account</Text>
-        <View style={styles.stats}>
-          {stats.map(([n, label]) => (
-            <View key={label} style={[styles.stat, { backgroundColor: theme.surface2 }]}>
-              <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 24 }}>{n}</Text>
-              <Text style={{ color: theme.muted, fontSize: 12, marginTop: 2 }}>{label}</Text>
-            </View>
-          ))}
-        </View>
-        <View style={styles.syncRow}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-            <Icon
-              name={syncStatus.state === 'error' ? 'alert-circle' : 'check-circle'}
-              size={16}
-              color={syncStatus.state === 'error' ? theme.danger : theme.accent}
-            />
-            <Text style={{ color: syncStatus.state === 'error' ? theme.danger : theme.muted, fontSize: 13, flex: 1 }}>
-              {syncStatus.state === 'syncing'
+      <SectionLabel>Sync</SectionLabel>
+      <Card>
+        <View style={styles.syncHead}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[TYPE.callout, { color: theme.ink, fontWeight: '600' }]}>Synced to your account</Text>
+            <Text style={[TYPE.caption, { color: failed ? theme.danger : theme.inkMuted, marginTop: 2 }]}>
+              {syncing
                 ? 'Syncing…'
-                : syncStatus.state === 'error'
+                : failed
                   ? `Sync failed: ${syncStatus.error}`
                   : `Last synced ${timeAgo(account.lastSyncAt)}`}
             </Text>
           </View>
-          <PillButton title="Sync now" onPress={syncNow} loading={syncStatus.state === 'syncing'} style={{ minHeight: 40 }} />
+          <View>
+            <StatusBadge tone={syncing ? 'running' : failed ? 'danger' : 'success'}>
+              {syncing ? 'Syncing' : failed ? 'Failed' : 'Synced'}
+            </StatusBadge>
+          </View>
         </View>
+        <View style={styles.stats}>
+          {stats.map(([n, label]) => (
+            <View key={label} style={[styles.stat, { backgroundColor: theme.fill }]}>
+              <Text style={[TYPE.title, { color: theme.ink }]}>{n}</Text>
+              <Text style={[TYPE.caption, { color: theme.inkMuted }]}>{label}</Text>
+            </View>
+          ))}
+        </View>
+        <Divider />
+        <ListRow
+          icon="refresh-cw"
+          title="Sync now"
+          onPress={syncing ? undefined : syncNow}
+          right={syncing ? <ActivityIndicator color={theme.inkMuted} /> : undefined}
+        />
       </Card>
 
-      <Pressable onPress={() => router.push('/friends')} accessibilityRole="button" style={{ marginTop: 12 }}>
-        <Card style={styles.friendsRow}>
-          <Icon name="users" size={18} color={theme.text} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.text, fontSize: 15 }}>Friends</Text>
-            <Text style={{ color: theme.muted, fontSize: 13, marginTop: 1 }}>Share files with friends on this server</Text>
-          </View>
-          <Icon name="chevron-right" size={16} />
-        </Card>
-      </Pressable>
+      <Card style={{ marginTop: 12 }}>
+        <ListRow
+          icon="users"
+          title="Friends"
+          subtitle="Share files with friends on this server"
+          chevron
+          onPress={() => router.push('/friends')}
+        />
+      </Card>
 
       <SectionLabel>Account server</SectionLabel>
-      <Card style={{ padding: 16 }}>
-        <Text style={{ color: theme.text, fontFamily: 'monospace', fontSize: 14 }}>{account.serverUrl}</Text>
-        <Text style={{ color: theme.muted, fontSize: 13, marginTop: 6 }}>
+      <Card style={styles.serverCard}>
+        <Text style={[TYPE.code, { color: theme.ink }]}>{account.serverUrl}</Text>
+        <Text style={[TYPE.caption, { color: theme.inkMuted }]}>
           Keys and tokens stay on each device. Sign in with this account on another phone to get your memory there.
         </Text>
       </Card>
 
-      <Pressable
+      <PillButton
+        title="Sign out"
+        variant="danger"
+        icon="log-out"
+        style={{ marginTop: 24 }}
         onPress={() =>
           Alert.alert('Sign out?', 'Your data stays on this device and in your account.', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Sign out', style: 'destructive', onPress: signOut },
           ])
         }
-        style={styles.signOut}
-        accessibilityRole="button"
-      >
-        <Text style={{ color: theme.danger, fontWeight: '600', fontSize: 15 }}>Sign out</Text>
-      </Pressable>
+      />
     </KeyboardAwareScrollView>
   );
 }
 
 function SignInForm() {
   const theme = useTheme();
+  const page = usePageStyle(480);
   const { signIn, memories, conversations, skills, projects, mcpServers, plugins } = useStore();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [server, setServer] = useState(DEFAULT_SERVER);
@@ -126,9 +179,6 @@ function SignInForm() {
   const [password, setPassword] = useState('');
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
-
-  const input = [styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }];
-  const label = (t: string) => <Text style={[styles.label, { color: theme.muted }]}>{t}</Text>;
 
   /** Signing in to another account than this phone last used would add this phone's data to it: ask first. */
   const confirmMerge = async (): Promise<boolean> => {
@@ -158,145 +208,90 @@ function SignInForm() {
     }
   };
 
-  const benefits: [IconName, string][] = [
-    ['bookmark', 'Memory syncs across devices'],
-    ['message-square', 'Chats on your phone and tablet'],
-    ['layers', 'Skills and MCP servers go with you'],
-  ];
+  const title = mode === 'signin' ? 'Sign in' : 'Create account';
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
+    <KeyboardAwareScrollView
+      style={{ backgroundColor: theme.bg }}
+      contentContainerStyle={[page, { flexGrow: 1 }]}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+    >
       <Stack.Screen options={{ title: '' }} />
-      <View style={{ alignItems: 'center' }}>
-        <View style={[styles.mark, { backgroundColor: theme.accent }]}>
-          <Text style={{ color: '#FFFFFF', fontSize: 22, fontWeight: '700' }}>T</Text>
-        </View>
-        <Text style={{ fontFamily: theme.serif, fontSize: 32, color: theme.text, marginTop: 16, textAlign: 'center' }}>
-          Welcome to TryChat
-        </Text>
-        <Text style={{ color: theme.muted, fontSize: 15, marginTop: 6, textAlign: 'center' }}>
-          Sign in and your memory follows you to every device.
-        </Text>
-      </View>
+      <Text style={[TYPE.title, { color: theme.ink }]} accessibilityRole="header">
+        {title}
+      </Text>
+      <Text style={[TYPE.body, { color: theme.inkMuted, marginTop: 6 }]}>Keep your memory and chats on every device.</Text>
 
-      <View style={[styles.segment, { backgroundColor: theme.surface2 }]}>
-        {(['signin', 'signup'] as const).map((m) => (
-          <Pressable
-            key={m}
-            onPress={() => setMode(m)}
-            style={[styles.segmentItem, mode === m && { backgroundColor: theme.surface }]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: mode === m }}
-          >
-            <Text style={{ color: mode === m ? theme.text : theme.muted, fontWeight: '600' }}>
-              {m === 'signin' ? 'Sign in' : 'Create account'}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <SegmentedControl label="Account" options={MODES} value={mode} onChange={setMode} style={{ marginTop: 24 }} />
 
-      {mode === 'signup' && (
-        <>
-          {label('Name')}
-          <TextInput value={name} onChangeText={setName} placeholder="Your name" placeholderTextColor={theme.faint} style={input} />
-        </>
-      )}
-      {label('Email')}
-      <TextInput
-        value={email}
-        onChangeText={setEmail}
-        placeholder="you@example.com"
-        placeholderTextColor={theme.faint}
-        autoCapitalize="none"
-        keyboardType="email-address"
-        autoComplete="email"
-        style={input}
-      />
-      {label('Password')}
-      <TextInput
-        value={password}
-        onChangeText={setPassword}
-        placeholder={mode === 'signup' ? 'At least 8 characters' : 'Password'}
-        placeholderTextColor={theme.faint}
-        secureTextEntry
-        autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-        style={input}
-      />
+      <View style={styles.form}>
+        {mode === 'signup' && <TextField label="Name" value={name} onChangeText={setName} placeholder="Your name" />}
+        <TextField
+          label="Email"
+          value={email}
+          onChangeText={setEmail}
+          placeholder="you@example.com"
+          autoCapitalize="none"
+          keyboardType="email-address"
+          autoComplete="email"
+        />
+        <TextField
+          label="Password"
+          value={password}
+          onChangeText={setPassword}
+          placeholder={mode === 'signup' ? 'At least 8 characters' : 'Password'}
+          secureTextEntry
+          autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+        />
 
-      {editingServer ? (
-        <>
-          {label('Account server')}
-          <TextInput
+        {editingServer ? (
+          <TextField
+            label="Account server"
             value={server}
             onChangeText={setServer}
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="url"
-            style={[input, { fontFamily: 'monospace', fontSize: 14 }]}
+            mono
           />
-        </>
-      ) : (
-        <View style={[styles.serverRow, { borderColor: theme.border }]}>
-          <Icon name="server" size={16} />
-          <Text style={{ color: theme.muted, fontSize: 13 }}>Account server</Text>
-          <Text style={{ color: theme.text, fontFamily: 'monospace', fontSize: 13, flex: 1 }} numberOfLines={1}>
-            {hostOf(server)}
-          </Text>
-          <Pressable onPress={() => setEditingServer(true)} hitSlop={12} accessibilityRole="button">
-            <Text style={{ color: theme.primary, fontWeight: '600', fontSize: 13 }}>Change</Text>
-          </Pressable>
-        </View>
-      )}
+        ) : (
+          <Card style={styles.serverRow}>
+            <Icon name="server" size={16} />
+            <Text style={[TYPE.caption, { color: theme.inkMuted }]}>Account server</Text>
+            <Text style={{ color: theme.ink, fontFamily: FONT.mono, fontSize: 12, lineHeight: 16, flex: 1 }} numberOfLines={1}>
+              {hostOf(server)}
+            </Text>
+            <TextAction title="Change" onPress={() => setEditingServer(true)} />
+          </Card>
+        )}
 
-      {!!error && <Text style={{ color: theme.danger, marginTop: 12 }}>{error}</Text>}
-
-      <PillButton
-        title={mode === 'signin' ? 'Sign in' : 'Create account'}
-        onPress={submit}
-        loading={working}
-        disabled={!email || !password}
-        style={{ marginTop: 20, minHeight: 52 }}
-      />
-      <View style={styles.orRow}>
-        <View style={[styles.orLine, { backgroundColor: theme.border }]} />
-        <Text style={{ color: theme.faint, fontSize: 12 }}>or</Text>
-        <View style={[styles.orLine, { backgroundColor: theme.border }]} />
+        {!!error && (
+          <Banner tone="danger" title={mode === 'signin' ? 'Couldn’t sign in.' : 'Couldn’t create your account.'}>
+            {error}
+          </Banner>
+        )}
       </View>
-      <PillButton title="Continue without an account" variant="secondary" onPress={() => router.back()} />
 
-      <Card style={{ marginTop: 24 }}>
-        {benefits.map(([icon, text], i) => (
-          <View key={text}>
-            {i > 0 && <Divider />}
-            <View style={styles.benefit}>
-              <Icon name={icon} size={18} color={theme.text} />
-              <Text style={{ color: theme.text, fontSize: 13 }}>{text}</Text>
-            </View>
-          </View>
-        ))}
-      </Card>
-      <Text style={{ color: theme.faint, fontSize: 12, textAlign: 'center', marginTop: 16 }}>
-        Keys and tokens never leave this device.
-      </Text>
+      <View style={{ flexGrow: 1, minHeight: 24 }} />
+      <View style={{ gap: 8 }}>
+        <PillButton title={title} size="lg" onPress={submit} loading={working} disabled={!email || !password} />
+        <PillButton title="Continue without an account" variant="ghost" onPress={() => router.back()} />
+        <Text style={[TYPE.caption, { color: theme.inkFaint, textAlign: 'center', marginTop: 4 }]}>
+          Keys and tokens never leave this device.
+        </Text>
+      </View>
     </KeyboardAwareScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 20, paddingBottom: 48 },
-  avatar: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center' },
-  mark: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
-  stats: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  stat: { flex: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  syncRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14 },
-  friendsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 60 },
-  signOut: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 24 },
-  segment: { flexDirection: 'row', borderRadius: 999, padding: 4, marginTop: 24 },
-  segmentItem: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
-  label: { fontSize: 13, marginTop: 16, marginBottom: 6 },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 48 },
-  serverRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, marginTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
-  orRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 14 },
-  orLine: { flex: 1, height: StyleSheet.hairlineWidth },
-  benefit: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 48 },
+  profile: { alignItems: 'center', gap: 4, paddingTop: 16 },
+  avatar: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  syncHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 12, paddingTop: 12 },
+  stats: { flexDirection: 'row', gap: 8, padding: 12 },
+  stat: { flex: 1, borderRadius: RADIUS.sm, paddingVertical: 12, alignItems: 'center' },
+  serverCard: { padding: 16, gap: 6 },
+  form: { gap: 16, marginTop: 24 },
+  serverRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 8, minHeight: 48 },
 });

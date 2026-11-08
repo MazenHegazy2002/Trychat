@@ -6,11 +6,11 @@ import {
   useAudioPlayerStatus,
   useAudioRecorder,
   useAudioRecorderState,
-} from 'expo-audio';  
+} from 'expo-audio';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
-import { useTheme } from '../lib/theme';
+import { RADIUS, shadow, useTheme } from '../lib/theme';
 import type { Attachment } from '../lib/types';
 import { displayUri } from '../lib/webFiles';
 import { Icon } from './ui';
@@ -91,11 +91,15 @@ export function VoiceRecorder({
       <Pressable
         onPress={onCancel}
         disabled={sending}
-        style={[styles.round, { borderColor: theme.border }]}
+        style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+          styles.round,
+          { backgroundColor: pressed || hovered ? theme.fill : 'transparent' },
+        ]}
         accessibilityRole="button"
         accessibilityLabel={done ? 'Delete voice message' : 'Cancel recording'}
+        accessibilityState={{ disabled: sending }}
       >
-        <Icon name={done ? 'trash-2' : 'x'} size={18} color={theme.text} />
+        <Icon name={done ? 'trash-2' : 'x'} size={20} color={sending ? theme.inkFaint : theme.inkMuted} />
       </Pressable>
       {done ? (
         <View style={{ flex: 1 }}>
@@ -103,31 +107,36 @@ export function VoiceRecorder({
         </View>
       ) : (
         <View style={styles.timer} accessibilityLiveRegion="polite" accessible accessibilityLabel={`Recording, ${formatDuration(state.durationMillis)}`}>
-          <View style={[styles.dot, { backgroundColor: theme.danger, opacity: state.isRecording ? 1 : 0.4 }]} />
-          <Text style={{ color: theme.text, fontSize: 16, fontVariant: ['tabular-nums'] }}>
+          <View style={[styles.dot, { backgroundColor: state.isRecording ? theme.danger : theme.inkFaint }]} />
+          <Text style={{ color: theme.ink, fontSize: 16, lineHeight: 24, fontVariant: ['tabular-nums'] }}>
             {formatDuration(state.durationMillis)}
           </Text>
-          <Text style={{ color: theme.faint, fontSize: 13 }}> / {formatDuration(MAX_VOICE_MS)}</Text>
+          <Text style={{ color: theme.inkFaint, fontSize: 13, lineHeight: 18, fontVariant: ['tabular-nums'] }}> / {formatDuration(MAX_VOICE_MS)}</Text>
         </View>
       )}
       {done ? (
         <Pressable
           onPress={() => onSend(done.uri, done.durationMs)}
           disabled={sending}
-          style={[styles.round, { backgroundColor: theme.accent, borderWidth: 0 }]}
+          style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+            styles.send,
+            { backgroundColor: pressed ? theme.accentPress : hovered ? theme.accentHover : theme.accent },
+            shadow(theme, 'glow'),
+          ]}
           accessibilityRole="button"
           accessibilityLabel="Send voice message"
+          accessibilityState={{ busy: sending }}
         >
-          {sending ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Icon name="arrow-up" size={20} color="#FFFFFF" />}
+          {sending ? <ActivityIndicator size="small" color={theme.onAccent} /> : <Icon name="arrow-up" size={22} color={theme.onAccent} />}
         </Pressable>
       ) : (
         <Pressable
           onPress={stop}
-          style={[styles.round, { backgroundColor: theme.danger, borderWidth: 0 }]}
+          style={[styles.send, { backgroundColor: theme.dangerSoft }]}
           accessibilityRole="button"
           accessibilityLabel="Stop recording"
         >
-          <Icon name="square" size={14} color="#FFFFFF" />
+          <View style={[styles.stopSquare, { backgroundColor: theme.danger }]} />
         </Pressable>
       )}
     </View>
@@ -154,21 +163,21 @@ export function VoicePlayer({ uri, durationMs }: { uri: string; durationMs: numb
     <View style={styles.player}>
       <Pressable
         onPress={toggle}
-        style={[styles.play, { backgroundColor: theme.text }]}
+        style={[styles.play, { backgroundColor: theme.ink }]}
         accessibilityRole="button"
         accessibilityLabel={status.playing ? 'Pause voice message' : 'Play voice message'}
       >
         <Icon name={status.playing ? 'pause' : 'play'} size={16} color={theme.bg} />
       </Pressable>
       <View
-        style={[styles.track, { backgroundColor: theme.border }]}
+        style={[styles.track, { backgroundColor: theme.borderStrong }]}
         accessible
         accessibilityRole="progressbar"
         accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
       >
-        <View style={[styles.fill, { width: `${progress * 100}%`, backgroundColor: theme.accent }]} />
+        <View style={[styles.fill, { width: `${progress * 100}%`, backgroundColor: theme.ink }]} />
       </View>
-      <Text style={{ color: theme.muted, fontSize: 13, fontVariant: ['tabular-nums'], minWidth: 36 }}>
+      <Text style={{ color: theme.inkMuted, fontSize: 13, lineHeight: 18, fontVariant: ['tabular-nums'], minWidth: 36 }}>
         {formatDuration(status.playing || pos > 0 ? pos : total)}
       </Text>
     </View>
@@ -179,10 +188,10 @@ export function VoicePlayer({ uri, durationMs }: { uri: string; durationMs: numb
 export function VoiceNote({ a }: { a: Attachment }) {
   const theme = useTheme();
   return (
-    <View style={[styles.note, { backgroundColor: theme.userBubble, borderColor: theme.border }]}>
+    <View style={[styles.note, { backgroundColor: theme.userBubble }]}>
       <VoicePlayer uri={a.uri} durationMs={a.voice?.durationMs ?? 0} />
       {!!a.voice?.transcriptError && (
-        <Text style={{ color: theme.faint, fontSize: 12, marginTop: 2 }}>
+        <Text style={{ color: theme.inkFaint, fontSize: 12, lineHeight: 16, marginTop: 2, paddingHorizontal: 4 }}>
           No transcript: {a.voice.transcriptError}
         </Text>
       )}
@@ -191,13 +200,22 @@ export function VoiceNote({ a }: { a: Attachment }) {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44 },
-  round: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44 },
+  round: { width: 44, height: 44, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center' },
+  send: { width: 40, height: 40, margin: 2, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center' },
+  stopSquare: { width: 12, height: 12, borderRadius: 3 },
   timer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },
   dot: { width: 10, height: 10, borderRadius: 5 },
   player: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  play: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  play: { width: 44, height: 44, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center' },
   track: { flex: 1, height: 4, borderRadius: 2, overflow: 'hidden' },
   fill: { height: 4 },
-  note: { width: 250, maxWidth: '85%', borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 8, paddingVertical: 6 },
+  note: {
+    width: 250,
+    maxWidth: '85%',
+    borderRadius: RADIUS.lg,
+    borderBottomRightRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
 });

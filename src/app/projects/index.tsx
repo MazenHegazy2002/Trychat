@@ -1,15 +1,28 @@
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
-import { Card, Divider, Icon, ScreenIntro, SectionLabel } from '../../components/ui';
+import { Card, Divider, EmptyState, Icon, IconButton, IconTile, PillButton, ScreenIntro, SearchField, SectionLabel } from '../../components/ui';
 import { useStore } from '../../lib/store';
-import { useTheme } from '../../lib/theme';
-import { Text, TextInput } from '../../components/Text';
+import { RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, useTheme } from '../../lib/theme';
+import type { ChatMessage, Conversation } from '../../lib/types';
+import { Text } from '../../components/Text';
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const shownText = (m: ChatMessage) => m.displayText ?? m.content;
+
+function timeAgo(ts: number): string {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return 'now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 export default function ProjectsScreen() {
   const theme = useTheme();
+  const wide = useWindowDimensions().width >= WIDE_BREAKPOINT;
   const { projects, conversations } = useStore();
   const [query, setQuery] = useState('');
 
@@ -18,69 +31,62 @@ export default function ProjectsScreen() {
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .filter((p) => !q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q));
   const loose = [...conversations].filter((c) => !c.projectId).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
+  const newProject = () => router.push('/projects/new');
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <Pressable onPress={() => router.push('/projects/new')} style={styles.headerBtn} accessibilityLabel="New project">
-              <Icon name="plus" size={22} color={theme.text} />
-            </Pressable>
-          ),
-        }}
-      />
-      <ScreenIntro title="Your projects">Group chats, give them shared instructions and files.</ScreenIntro>
+    <KeyboardAwareScrollView
+      style={{ backgroundColor: theme.bg }}
+      contentContainerStyle={[styles.page, wide && styles.pageWide]}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+    >
+      <Stack.Screen options={{ headerRight: () => <IconButton name="plus" label="New project" onPress={newProject} /> }} />
+      <ScreenIntro title="Projects">Folders of chats that share instructions and files.</ScreenIntro>
 
-      <View style={[styles.search, { backgroundColor: theme.surface2 }]}>
-        <Icon name="search" size={16} />
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search projects"
-          placeholderTextColor={theme.faint}
-          style={{ flex: 1, color: theme.text, fontSize: 15, paddingVertical: 10 }}
-          accessibilityLabel="Search projects"
-        />
-      </View>
-
-      <View style={styles.grid}>
-        {shown.map((p, i) => {
-          const chats = conversations.filter((c) => c.projectId === p.id).length;
-          return (
-            <Pressable
-              key={p.id}
-              onPress={() => router.push(`/projects/${p.id}`)}
-              style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}
-              accessibilityRole="button"
-            >
-              <View style={[styles.tile, { backgroundColor: i === 0 ? theme.oat : theme.surface2 }]}>
-                <Icon name="folder" size={16} color={i === 0 ? theme.primary : theme.text} />
-              </View>
-              <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500', marginTop: 10 }} numberOfLines={1}>
-                {p.name}
-              </Text>
-              <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2, flex: 1 }} numberOfLines={2}>
-                {p.description || 'No description'}
-              </Text>
-              <Text style={{ color: theme.faint, fontSize: 12, marginTop: 8 }}>
-                {chats} chat{chats === 1 ? '' : 's'} · {p.files.length} file{p.files.length === 1 ? '' : 's'}
-              </Text>
-            </Pressable>
-          );
-        })}
-        {!q && (
-          <Pressable
-            onPress={() => router.push('/projects/new')}
-            style={[styles.card, styles.newCard, { borderColor: theme.oat }]}
-            accessibilityRole="button"
-          >
-            <Icon name="plus" size={22} color={theme.muted} />
-            <Text style={{ color: theme.muted, fontSize: 14, fontWeight: '500', marginTop: 6 }}>New project</Text>
-          </Pressable>
-        )}
-      </View>
-      {q && !shown.length && <Text style={{ color: theme.muted, marginTop: 12 }}>No projects match “{query}”.</Text>}
+      {projects.length === 0 ? (
+        <Card>
+          <EmptyState icon="folder" title="No projects yet" action={<PillButton title="New project" icon="plus" onPress={newProject} />}>
+            Group chats into a project and give them shared instructions and files.
+          </EmptyState>
+        </Card>
+      ) : (
+        <>
+          <SearchField value={query} onChangeText={setQuery} placeholder="Search projects" style={{ marginBottom: 12 }} />
+          <View style={{ gap: 8 }}>
+            {shown.map((p) => {
+              const chats = conversations.filter((c) => c.projectId === p.id).length;
+              return (
+                <Pressable
+                  key={p.id}
+                  onPress={() => router.push(`/projects/${p.id}`)}
+                  style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                    styles.project,
+                    { backgroundColor: pressed || hovered ? theme.fill : theme.surface, borderColor: theme.border },
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <IconTile name="folder" />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[TYPE.callout, { color: theme.ink, fontWeight: '600' }]} numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                    {!!p.description && (
+                      <Text style={[TYPE.caption, { color: theme.inkMuted }]} numberOfLines={1}>
+                        {p.description}
+                      </Text>
+                    )}
+                    <Text style={[TYPE.caption, { color: theme.inkFaint, fontSize: 12, lineHeight: 16, marginTop: 2 }]}>
+                      {plural(chats, 'chat')} · {plural(p.files.length, 'file')}
+                    </Text>
+                  </View>
+                  <Icon name="chevron-right" size={16} color={theme.inkFaint} />
+                </Pressable>
+              );
+            })}
+          </View>
+          {!!q && !shown.length && <EmptyState icon="search" title="No matching projects">{`Nothing matches “${query}”.`}</EmptyState>}
+        </>
+      )}
 
       {loose.length > 0 && (
         <>
@@ -88,29 +94,47 @@ export default function ProjectsScreen() {
           <Card>
             {loose.map((c, i) => (
               <View key={c.id}>
-                {i > 0 && <Divider />}
-                <Pressable onPress={() => router.push(`/chat/${c.id}`)} style={styles.chatRow} accessibilityRole="button">
-                  <Text style={{ color: theme.text, fontSize: 15, flex: 1 }} numberOfLines={1}>
-                    {c.title}
-                  </Text>
-                  <Icon name="chevron-right" size={16} />
-                </Pressable>
+                {i > 0 && <Divider inset={16} />}
+                <ChatRow chat={c} />
               </View>
             ))}
           </Card>
-          <Text style={{ color: theme.faint, fontSize: 12, marginTop: 8 }}>Long-press a chat in your chat list to move it into a project.</Text>
+          <Text style={[TYPE.caption, { color: theme.inkFaint, marginTop: 8, marginHorizontal: 4 }]}>
+            Long-press a chat in your chat list to move it into a project.
+          </Text>
         </>
       )}
     </KeyboardAwareScrollView>
   );
 }
 
+/** Title and time, then the last message on one line (like the chat list). */
+function ChatRow({ chat }: { chat: Conversation }) {
+  const theme = useTheme();
+  const last = [...chat.messages].reverse().find((m) => !m.toolResult && shownText(m));
+  return (
+    <Pressable
+      onPress={() => router.push(`/chat/${chat.id}`)}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.chatRow, (pressed || hovered) && { backgroundColor: theme.fill }]}
+      accessibilityRole="button"
+      accessibilityLabel={chat.title}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 12 }}>
+        <Text style={[TYPE.callout, { flex: 1, color: theme.ink, fontWeight: '500' }]} numberOfLines={1}>
+          {chat.title}
+        </Text>
+        <Text style={[TYPE.caption, { color: theme.inkFaint }]}>{timeAgo(chat.updatedAt)}</Text>
+      </View>
+      <Text style={[TYPE.caption, { color: theme.inkMuted, marginTop: 2 }]} numberOfLines={1}>
+        {last ? shownText(last).replace(/\s+/g, ' ') : 'Empty chat'}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  headerBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, marginBottom: 16 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
-  card: { width: '48.5%', minHeight: 140, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 14 },
-  newCard: { borderStyle: 'dashed', borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  tile: { width: 32, height: 32, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  chatRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, minHeight: 52 },
+  page: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 48 },
+  pageWide: { width: '100%', maxWidth: SIZE.contentMax, alignSelf: 'center', paddingHorizontal: 24, paddingTop: 28 },
+  project: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, minHeight: 64, borderRadius: RADIUS.md, borderWidth: 1 },
+  chatRow: { paddingHorizontal: 16, paddingVertical: 12, minHeight: 56 },
 });

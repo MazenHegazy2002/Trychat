@@ -1,20 +1,66 @@
+import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
+import type { Href } from 'expo-router';
+import { Fragment, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { Alert, Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { ModelPicker } from '../components/ModelPicker';
+import { Text } from '../components/Text';
+import {
+  Banner,
+  Card,
+  ClaySwitch,
+  Divider,
+  Icon,
+  ListRow,
+  PillButton,
+  SectionLabel,
+  SegmentedControl,
+  TextAction,
+  TextField,
+} from '../components/ui';
+import type { IconName } from '../components/ui';
 import { listModels } from '../lib/api';
 import { setBackgroundEnabled, subscribeBackgroundEnabled } from '../lib/background';
 import { DEFAULT_SETTINGS } from '../lib/storage';
 import { useStore } from '../lib/store';
 import { githubConnected, laptopConnected } from '../lib/tools';
-import { useTheme } from '../lib/theme';
+import { FONT, RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, setAppearance, useAppearance, useTheme } from '../lib/theme';
 import type { Settings } from '../lib/types';
-import { Text, TextInput } from '../components/Text';
+
+const FEATURES = [
+  ['builderMode', 'Builder mode', 'Ask the model for complete, runnable apps you can preview in-app'],
+  ['memoryEnabled', 'Long-term memory', 'The model remembers facts about you across chats'],
+  ['subAgents', 'Sub-agents', 'Let TryChat send helper agents to work on parts of a task in parallel'],
+  ['codeExecution', 'Run code', 'Let TryChat run JavaScript and Python on your phone to calculate and test'],
+  ['webAccess', 'Web access', 'Let TryChat search the web and read pages and APIs'],
+  ['stream', 'Stream responses', 'Show text as it is generated (turn off if your server does not support it)'],
+] as const;
+
+const APPEARANCE = [
+  { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
+  { value: 'system', label: 'System' },
+] as const;
+
+const TEMPERATURES = [0, 0.3, 0.7, 1, 1.3].map((t) => ({ value: String(t), label: String(t) }));
+const HISTORY = [10, 20, 40, 80, 200].map((n) => ({ value: String(n), label: String(n) }));
+
+interface NavRow {
+  href: Href;
+  icon: IconName;
+  title: string;
+  subtitle: string;
+  hint?: string;
+}
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const appearance = useAppearance();
+  const { width } = useWindowDimensions();
+  const wide = width >= WIDE_BREAKPOINT;
   const { settings, updateSettings, clearConversations, account, skills, mcpServers, mcpTools, plugins } = useStore();
   const [draft, setDraft] = useState<Settings>(settings);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -35,7 +81,7 @@ export default function SettingsScreen() {
     setTestResult(null);
     try {
       const models = await listModels(draft);
-      setTestResult({ ok: true, text: `Connected — ${models.length} model(s) available.` });
+      setTestResult({ ok: true, text: `${models.length} model${models.length === 1 ? '' : 's'} found.` });
       if (!draft.model && models.length) set('model', models[0]);
     } catch (e) {
       setTestResult({ ok: false, text: e instanceof Error ? e.message : String(e) });
@@ -44,232 +90,254 @@ export default function SettingsScreen() {
     }
   };
 
-  const label = (text: string) => <Text style={[styles.label, { color: theme.muted }]}>{text}</Text>;
-  const inputStyle = [styles.input, { backgroundColor: theme.surface, color: theme.text }];
+  const gh = githubConnected(settings);
+  const lap = laptopConnected(settings);
+  const toolCount = Object.values(mcpTools).flat().length;
+
+  const connectionRows: NavRow[] = [
+    {
+      href: '/connections',
+      icon: 'github',
+      title: 'GitHub & laptop',
+      subtitle: `GitHub: ${gh ? 'connected' : 'not connected'} · Laptop: ${lap ? 'connected' : 'not connected'}`,
+      hint: `GitHub ${gh ? 'connected' : 'not connected'}, laptop ${lap ? 'connected' : 'not connected'}`,
+    },
+    { href: '/skills', icon: 'zap', title: 'Skills', subtitle: `${skills.filter((k) => k.enabled).length} enabled` },
+    {
+      href: '/mcp',
+      icon: 'server',
+      title: 'MCP servers',
+      subtitle: mcpServers.length
+        ? `${mcpServers.length} server${mcpServers.length === 1 ? '' : 's'} · ${toolCount} tools`
+        : 'Add tools from MCP servers',
+    },
+    { href: '/store', icon: 'package', title: 'Store', subtitle: 'Browse plugins, skills and MCP servers' },
+    {
+      href: '/plugins',
+      icon: 'layers',
+      title: 'Plugins',
+      subtitle: plugins.length
+        ? `${plugins.length} installed · ${plugins.filter((p) => p.enabled).length} enabled`
+        : 'Add skills, commands, agents and tools in one install',
+    },
+  ];
+
+  const workRows: NavRow[] = [
+    { href: '/workspaces', icon: 'code', title: 'Workspaces', subtitle: 'Edit GitHub repos and folders; let the assistant work in them' },
+    { href: '/designs', icon: 'pen-tool', title: 'Design', subtitle: 'Design app screens and pages on a canvas with Claude' },
+    { href: '/tasks', icon: 'terminal', title: 'Tasks & terminal', subtitle: 'Running and recent replies, tools and laptop commands' },
+    { href: '/files', icon: 'file', title: 'Files', subtitle: 'Everything sent, received and shared in chats' },
+    { href: '/friends', icon: 'users', title: 'Friends', subtitle: 'Share files with friends who have an account' },
+  ];
+
+  const group = (rows: NavRow[]) => (
+    <Card>
+      {rows.map((r, i) => (
+        <Fragment key={r.title}>
+          {i > 0 && <Divider inset={44} />}
+          <ListRow
+            icon={r.icon}
+            title={r.title}
+            subtitle={r.subtitle}
+            chevron
+            onPress={() => router.push(r.href)}
+            accessibilityHint={r.hint}
+          />
+        </Fragment>
+      ))}
+    </Card>
+  );
+
+  const accountTitle = account ? account.user.name || account.user.email : 'Sign in or create an account';
+  const accountSub = account ? `${account.user.email} · memory synced` : 'Keep your memory and chats on every device';
+  const version = Constants.expoConfig?.version;
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
+    <KeyboardAwareScrollView
+      style={{ backgroundColor: theme.bg }}
+      contentContainerStyle={[styles.page, { paddingHorizontal: wide ? 24 : 16, paddingTop: wide ? 24 : 16 }]}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+    >
+      {/* Account first: tests tap the top of the screen to open it. */}
       <Pressable
         onPress={() => router.push('/account')}
-        style={[inputStyle, { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 }]}
+        accessibilityRole="button"
+        accessibilityLabel={accountTitle}
+        accessibilityHint={accountSub}
+        style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+          styles.accountCard,
+          { backgroundColor: pressed || hovered ? theme.fill : theme.surface, borderColor: theme.border },
+        ]}
       >
-        <View style={[styles.avatar, { backgroundColor: account ? theme.primary : theme.border }]}>
-          <Text style={{ color: theme.onPrimary, fontWeight: '700' }}>
-            {account ? (account.user.name || account.user.email)[0]?.toUpperCase() : '?'}
+        <View style={[styles.avatar, { backgroundColor: account ? theme.accentSoft : theme.fill }]}>
+          {account ? (
+            <Text style={[TYPE.headline, { color: theme.accent }]}>{accountTitle[0]?.toUpperCase()}</Text>
+          ) : (
+            <Icon name="user" size={20} color={theme.inkMuted} />
+          )}
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[TYPE.callout, { color: theme.ink, fontWeight: '500' }]} numberOfLines={1}>
+            {accountTitle}
+          </Text>
+          <Text style={[TYPE.caption, { color: theme.inkMuted }]} numberOfLines={1}>
+            {accountSub}
           </Text>
         </View>
-        <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>
-            {account ? account.user.name : 'Sign in or create an account'}
-          </Text>
-          <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
-            {account ? `${account.user.email} · memory synced` : 'Keep your memory and chats on every device'}
-          </Text>
-        </View>
-        <Text style={{ color: theme.muted, fontSize: 18 }}>›</Text>
+        <Icon name="chevron-right" size={16} color={theme.inkFaint} />
       </Pressable>
 
-      <Text style={[styles.section, { color: theme.text }]}>Server</Text>
-      {label('Base URL')}
-      <TextInput
-        value={draft.baseUrl}
-        onChangeText={(v) => set('baseUrl', v.trim())}
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="url"
-        placeholder="http://host:port/v1"
-        placeholderTextColor={theme.muted}
-        style={inputStyle}
-      />
-      {label('API key (stored securely on this device)')}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <TextInput
+      <SectionLabel>Connections</SectionLabel>
+      {group(connectionRows)}
+
+      <SectionLabel>Your work</SectionLabel>
+      {group(workRows)}
+
+      <SectionLabel>Server</SectionLabel>
+      <View style={styles.stack}>
+        <TextField
+          label="Base URL"
+          value={draft.baseUrl}
+          onChangeText={(v) => set('baseUrl', v.trim())}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          placeholder="http://host:port/v1"
+          mono
+        />
+        <TextField
+          label="API key"
+          hint="Stored securely on this device."
           value={draft.apiKey}
           onChangeText={(v) => set('apiKey', v.trim())}
           autoCapitalize="none"
           autoCorrect={false}
           secureTextEntry={!showKey}
           placeholder="sk-…"
-          placeholderTextColor={theme.muted}
-          style={[inputStyle, { flex: 1 }]}
+          mono
+          right={
+            <FieldAction
+              title={showKey ? 'Hide' : 'Show'}
+              label={showKey ? 'Hide API key' : 'Show API key'}
+              onPress={() => setShowKey((s) => !s)}
+            />
+          }
         />
-        <Pressable onPress={() => setShowKey((s) => !s)} hitSlop={8}>
-          <Text style={{ color: theme.primary, fontWeight: '600' }}>{showKey ? 'Hide' : 'Show'}</Text>
-        </Pressable>
-      </View>
-      <Pressable onPress={test} style={[styles.button, { backgroundColor: theme.primary }]} disabled={testing}>
-        {testing ? (
-          <ActivityIndicator color={theme.onPrimary} />
-        ) : (
-          <Text style={{ color: theme.onPrimary, fontWeight: '700' }}>Test connection</Text>
+        <PillButton title="Test connection" variant="secondary" onPress={test} loading={testing} />
+        {testResult && (
+          <Banner tone={testResult.ok ? 'success' : 'danger'} title={testResult.ok ? 'Connected.' : 'Couldn’t connect.'}>
+            {testResult.text}
+          </Banner>
         )}
-      </Pressable>
-      {testResult && (
-        <Text style={{ color: testResult.ok ? theme.text : theme.danger, marginTop: 8 }}>{testResult.text}</Text>
-      )}
+      </View>
 
-      <Text style={[styles.section, { color: theme.text }]}>Connections</Text>
-      <Pressable
-        onPress={() => router.push('/connections')}
-        style={[inputStyle, { flexDirection: 'row', alignItems: 'center', marginTop: 8 }]}
-        accessibilityRole="button"
-        accessibilityLabel="GitHub & laptop"
-        accessibilityHint={`GitHub ${githubConnected(settings) ? 'connected' : 'not connected'}, laptop ${laptopConnected(settings) ? 'connected' : 'not connected'}`}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.text, fontSize: 15 }}>GitHub & laptop</Text>
-          <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
-            GitHub: {githubConnected(settings) ? 'connected' : 'not connected'} · Laptop:{' '}
-            {laptopConnected(settings) ? 'connected' : 'not connected'}
-          </Text>
+      <SectionLabel>Model</SectionLabel>
+      <View style={styles.stack}>
+        <View style={styles.field}>
+          <FieldLabel>Default model for new chats</FieldLabel>
+          <Pressable
+            onPress={() => setPickerOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Default model for new chats, ${draft.model || 'not chosen'}`}
+            style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+              styles.select,
+              { backgroundColor: theme.fill, borderColor: pressed || hovered ? theme.ink : theme.borderStrong },
+            ]}
+          >
+            <Text
+              style={[
+                draft.model ? { fontFamily: FONT.mono, fontSize: 14, lineHeight: 20 } : TYPE.callout,
+                { color: draft.model ? theme.ink : theme.inkFaint, flex: 1 },
+              ]}
+              numberOfLines={1}
+            >
+              {draft.model || 'Tap to choose a model'}
+            </Text>
+            <Icon name="chevron-down" size={16} />
+          </Pressable>
         </View>
-        <Text style={{ color: theme.muted, fontSize: 18 }}>›</Text>
-      </Pressable>
-
-      {(
-        [
-          ['/skills', 'Skills', `${skills.filter((k) => k.enabled).length} enabled`],
-          [
-            '/mcp',
-            'MCP servers',
-            mcpServers.length
-              ? `${mcpServers.length} server${mcpServers.length === 1 ? '' : 's'} · ${Object.values(mcpTools).flat().length} tools`
-              : 'Add tools from MCP servers',
-          ],
-          ['/store', 'Store', 'Browse plugins, skills and MCP servers'],
-          ['/tasks', 'Tasks & terminal', 'Running and recent replies, tools and laptop commands'],
-          ['/workspaces', 'Workspaces', 'Edit GitHub repos and folders; let the assistant work in them'],
-          ['/designs', 'Design', 'Design app screens and pages on a canvas with Claude'],
-          ['/files', 'Files', 'Everything sent, received and shared in chats'],
-          ['/friends', 'Friends', 'Share files with friends who have an account'],
-          [
-            '/plugins',
-            'Plugins',
-            plugins.length
-              ? `${plugins.length} installed · ${plugins.filter((p) => p.enabled).length} enabled`
-              : 'Add skills, commands, agents and tools in one install',
-          ],
-        ] as const
-      ).map(([href, title, sub]) => (
-        <Pressable
-          key={href}
-          onPress={() => router.push(href)}
-          style={[inputStyle, { flexDirection: 'row', alignItems: 'center', marginTop: 8 }]}
-          accessibilityRole="button"
-          accessibilityLabel={title}
-          accessibilityHint={sub}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.text, fontSize: 15 }}>{title}</Text>
-            <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>{sub}</Text>
-          </View>
-          <Text style={{ color: theme.muted, fontSize: 18 }}>›</Text>
-        </Pressable>
-      ))}
-
-      <Text style={[styles.section, { color: theme.text }]}>Model</Text>
-      {label('Default model for new chats')}
-      <Pressable onPress={() => setPickerOpen(true)} style={[inputStyle, { justifyContent: 'center' }]}>
-        <Text style={{ color: draft.model ? theme.text : theme.muted, fontSize: 15 }}>
-          {draft.model || 'Tap to choose a model'}
-        </Text>
-      </Pressable>
-      {label('Voice transcription model')}
-      <TextInput
-        value={draft.transcriptionModel}
-        onChangeText={(v) => set('transcriptionModel', v.trim())}
-        autoCapitalize="none"
-        autoCorrect={false}
-        placeholder="whisper-1"
-        placeholderTextColor={theme.muted}
-        style={inputStyle}
-        accessibilityLabel="Voice transcription model"
-      />
-      {label(`Temperature: ${draft.temperature.toFixed(1)}`)}
-      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-        {[0, 0.3, 0.7, 1, 1.3].map((t) => (
-          <Pressable
-            key={t}
-            onPress={() => set('temperature', t)}
-            style={[
-              styles.chip,
-              { borderColor: theme.border, backgroundColor: draft.temperature === t ? theme.primary : 'transparent' },
-            ]}
-          >
-            <Text style={{ color: draft.temperature === t ? theme.onPrimary : theme.text }}>{t}</Text>
-          </Pressable>
-        ))}
-      </View>
-      {label(`Messages of history sent per request: ${draft.contextMessages}`)}
-      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-        {[10, 20, 40, 80, 200].map((n) => (
-          <Pressable
-            key={n}
-            onPress={() => set('contextMessages', n)}
-            style={[
-              styles.chip,
-              { borderColor: theme.border, backgroundColor: draft.contextMessages === n ? theme.primary : 'transparent' },
-            ]}
-          >
-            <Text style={{ color: draft.contextMessages === n ? theme.onPrimary : theme.text }}>{n}</Text>
-          </Pressable>
-        ))}
+        <TextField
+          label="Voice transcription model"
+          value={draft.transcriptionModel}
+          onChangeText={(v) => set('transcriptionModel', v.trim())}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="whisper-1"
+          mono
+          accessibilityLabel="Voice transcription model"
+        />
+        <View style={styles.field}>
+          <FieldLabel>Temperature: {draft.temperature.toFixed(1)}</FieldLabel>
+          <SegmentedControl
+            label="Temperature"
+            options={TEMPERATURES}
+            value={String(draft.temperature)}
+            onChange={(v) => set('temperature', Number(v))}
+          />
+        </View>
+        <View style={styles.field}>
+          <FieldLabel>Messages of history sent per request: {draft.contextMessages}</FieldLabel>
+          <SegmentedControl
+            label="Messages of history sent per request"
+            options={HISTORY}
+            value={String(draft.contextMessages)}
+            onChange={(v) => set('contextMessages', Number(v))}
+          />
+        </View>
       </View>
 
-      <Text style={[styles.section, { color: theme.text }]}>Behavior</Text>
-      {label('System prompt')}
-      <TextInput
+      <SectionLabel>Appearance</SectionLabel>
+      <SegmentedControl label="Theme" options={APPEARANCE} value={appearance} onChange={setAppearance} />
+
+      <SectionLabel>Features</SectionLabel>
+      <Card>
+        {FEATURES.map(([key, title, desc], i) => (
+          <Fragment key={key}>
+            {i > 0 && <Divider inset={12} />}
+            <SwitchRow title={title} subtitle={desc} value={draft[key]} onValueChange={(v) => set(key, v)} />
+          </Fragment>
+        ))}
+        {Platform.OS !== 'web' && (
+          <>
+            <Divider inset={12} />
+            <SwitchRow
+              title="Keep working in the background"
+              subtitle="Finish replies and tools after you leave the app, and notify you when done (this device only)"
+              value={background}
+              onValueChange={setBackgroundEnabled}
+            />
+          </>
+        )}
+      </Card>
+
+      <SectionLabel>System prompt</SectionLabel>
+      <TextField
         value={draft.systemPrompt}
         onChangeText={(v) => set('systemPrompt', v)}
         multiline
-        style={[inputStyle, { minHeight: 100, textAlignVertical: 'top' }]}
+        accessibilityLabel="System prompt"
       />
-      <Pressable onPress={() => set('systemPrompt', DEFAULT_SETTINGS.systemPrompt)}>
-        <Text style={{ color: theme.primary, marginTop: 6 }}>Reset system prompt</Text>
-      </Pressable>
-
-      {(
-        [
-          ['builderMode', 'Builder mode', 'Ask the model for complete, runnable apps you can preview in-app'],
-          ['memoryEnabled', 'Long-term memory', 'The model remembers facts about you across chats'],
-          ['subAgents', 'Sub-agents', 'Let TryChat send helper agents to work on parts of a task in parallel'],
-          ['codeExecution', 'Run code', 'Let TryChat run JavaScript and Python on your phone to calculate and test'],
-          ['webAccess', 'Web access', 'Let TryChat search the web and read pages and APIs'],
-          ['stream', 'Stream responses', 'Show text as it is generated (turn off if your server does not support it)'],
-        ] as const
-      ).map(([key, title, desc]) => (
-        <View key={key} style={[styles.switchRow, { borderBottomColor: theme.border }]}>
-          <View style={{ flex: 1, paddingRight: 12 }}>
-            <Text style={{ color: theme.text, fontSize: 16 }}>{title}</Text>
-            <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>{desc}</Text>
-          </View>
-          <Switch value={draft[key]} onValueChange={(v) => set(key, v)} />
-        </View>
-      ))}
-
-      {Platform.OS !== 'web' && (
-      <View style={[styles.switchRow, { borderBottomColor: theme.border }]}>
-        <View style={{ flex: 1, paddingRight: 12 }}>
-          <Text style={{ color: theme.text, fontSize: 16 }}>Keep working in the background</Text>
-          <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
-            Finish replies and tools after you leave the app, and notify you when done (this device only)
-          </Text>
-        </View>
-        <Switch value={background} onValueChange={setBackgroundEnabled} />
+      <View style={{ alignSelf: 'flex-start' }}>
+        <TextAction title="Reset system prompt" onPress={() => set('systemPrompt', DEFAULT_SETTINGS.systemPrompt)} />
       </View>
-      )}
 
-      <Text style={[styles.section, { color: theme.text }]}>Data</Text>
-      <Pressable
-        onPress={() =>
-          Alert.alert('Delete all chats?', 'This cannot be undone. Memories are kept.', [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Delete', style: 'destructive', onPress: clearConversations },
-          ])
-        }
-      >
-        <Text style={{ color: theme.danger, fontSize: 16 }}>Delete all chats</Text>
-      </Pressable>
+      <SectionLabel>Data</SectionLabel>
+      <Card>
+        <ListRow
+          icon="trash-2"
+          title="Delete all chats"
+          danger
+          onPress={() =>
+            Alert.alert('Delete all chats?', 'This cannot be undone. Memories are kept.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: clearConversations },
+            ])
+          }
+        />
+      </Card>
+
+      {!!version && <Text style={[TYPE.caption, styles.version, { color: theme.inkFaint }]}>TryChat {version}</Text>}
 
       <ModelPicker
         visible={pickerOpen}
@@ -281,12 +349,62 @@ export default function SettingsScreen() {
   );
 }
 
+function FieldLabel({ children }: { children: ReactNode }) {
+  const theme = useTheme();
+  return <Text style={{ color: theme.inkMuted, fontSize: 13, lineHeight: 18, fontWeight: '500' }}>{children}</Text>;
+}
+
+/** Show / Hide text button at the end of a secret field. */
+function FieldAction({ title, label, onPress }: { title: string; label: string; onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={4}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.fieldAction,
+        { backgroundColor: pressed || hovered ? theme.surfaceRaised : 'transparent' },
+      ]}
+    >
+      <Text style={[TYPE.subhead, { color: theme.accent }]}>{title}</Text>
+    </Pressable>
+  );
+}
+
+/** A setting that takes effect at once: title, one sentence, and a switch. */
+function SwitchRow({
+  title,
+  subtitle,
+  value,
+  onValueChange,
+}: {
+  title: string;
+  subtitle?: string;
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+}) {
+  const theme = useTheme();
+  return (
+    <View style={styles.switchRow}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[TYPE.callout, { color: theme.ink }]}>{title}</Text>
+        {!!subtitle && <Text style={[TYPE.caption, { color: theme.inkMuted, marginTop: 2 }]}>{subtitle}</Text>}
+      </View>
+      <ClaySwitch value={value} onValueChange={onValueChange} label={title} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  section: { fontSize: 20, fontWeight: '700', marginTop: 24, marginBottom: 4 },
-  label: { fontSize: 13, marginTop: 14, marginBottom: 6 },
-  input: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, minHeight: 44 },
-  button: { marginTop: 14, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
-  chip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 6 },
-  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  switchRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  page: { paddingBottom: 48, width: '100%', maxWidth: SIZE.contentMax, alignSelf: 'center' },
+  accountCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: RADIUS.md, borderWidth: 1 },
+  avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  stack: { gap: 16 },
+  field: { gap: 6 },
+  select: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, borderRadius: RADIUS.sm, borderWidth: 1, paddingLeft: 14, paddingRight: 12 },
+  fieldAction: { minHeight: 40, paddingHorizontal: 12, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center' },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingHorizontal: 12, paddingVertical: 10 },
+  version: { textAlign: 'center', marginTop: 20 },
 });

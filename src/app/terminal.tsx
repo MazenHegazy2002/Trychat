@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Platform, Pressable, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { MONO, TERM, TerminalLog } from '../components/TerminalLog';
+import { KeyboardPadded } from '../components/KeyboardPadded';
+import { TerminalLog, terminalColors } from '../components/TerminalLog';
+import { Banner, EmptyState, IconButton } from '../components/ui';
 import { runOnLaptop } from '../lib/laptopStream';
 import type { LaptopRunHandle } from '../lib/laptopStream';
 import { useStore } from '../lib/store';
 import { appendTask, endTask, setTaskCancel, startTask } from '../lib/tasks';
-import { useTheme } from '../lib/theme';
+import { FONT, RADIUS, SIZE, useTheme } from '../lib/theme';
 import { laptopConnected, laptopInfo } from '../lib/tools';
 import { Text, TextInput } from '../components/Text';
 
@@ -17,6 +20,8 @@ const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 /** Interactive shell on the connected laptop: each line runs through the bridge (streaming), cwd is carried over. */
 export default function TerminalScreen() {
   const theme = useTheme();
+  const term = terminalColors(theme);
+  const insets = useSafeAreaInsets();
   const { settings } = useStore();
   const connected = laptopConnected(settings);
   const [log, setLog] = useState('');
@@ -42,9 +47,10 @@ export default function TerminalScreen() {
 
   if (!connected) {
     return (
-      <View style={{ flex: 1, backgroundColor: theme.bg, padding: 24 }}>
-        <Text style={{ color: theme.text, fontSize: 16 }}>The laptop isn’t connected.</Text>
-        <Text style={{ color: theme.muted, marginTop: 8 }}>Start the bridge on your laptop and pair it in Settings → Connections → Laptop.</Text>
+      <View style={{ flex: 1, backgroundColor: theme.bg, justifyContent: 'center' }}>
+        <EmptyState icon="terminal" title="The laptop isn’t connected.">
+          Start the bridge on your laptop and pair it in Settings → Connections → Laptop.
+        </EmptyState>
       </View>
     );
   }
@@ -60,7 +66,7 @@ export default function TerminalScreen() {
     history.current = [command, ...history.current.filter((c) => c !== command)].slice(0, 100);
     histPos.current = -1;
     setInput('');
-    setLog((l) => `${l}\x1b[32m${cwd ?? ''} $\x1b[0m ${command}\n`);
+    setLog((l) => `${l}\x1b[97m${cwd ?? ''} $ ${command}\x1b[0m\n`);
     // POSIX shells: run in the remembered folder and report where the command left us.
     const wrapped =
       windows || !cwd
@@ -118,45 +124,84 @@ export default function TerminalScreen() {
     setInput(next === -1 ? '' : history.current[next]);
   };
 
+  const canRun = !!input.trim();
+  const bottom = Math.max(insets.bottom, 12);
   return (
-    <View style={{ flex: 1, backgroundColor: TERM.bg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#3A2A20' }}>
-        <Text style={{ color: '#FFCB6B', fontSize: 12, flex: 1 }} numberOfLines={1}>
+    <KeyboardPadded bottomInset={bottom} style={{ backgroundColor: theme.bg }}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+        <Banner tone="warning" icon="alert-triangle">
           Running on {host}: commands have full access to your laptop
-        </Text>
+        </Banner>
       </View>
-      <TerminalLog text={log} />
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, borderTopWidth: 1, borderTopColor: '#30302E' }}>
-        <Pressable onPress={() => recall(1)} hitSlop={6} accessibilityLabel="Previous command">
-          <Text style={{ color: TERM.dim, fontSize: 18 }}>↑</Text>
-        </Pressable>
-        <Pressable onPress={() => recall(-1)} hitSlop={6} accessibilityLabel="Next command">
-          <Text style={{ color: TERM.dim, fontSize: 18 }}>↓</Text>
-        </Pressable>
-        <Text style={{ color: TERM.prompt, fontFamily: MONO }}>$</Text>
-        <TextInput
-          value={input}
-          onChangeText={setInput}
-          onSubmitEditing={run}
-          submitBehavior="submit"
-          placeholder={running ? 'running…' : 'command'}
-          placeholderTextColor={TERM.dim}
-          autoCapitalize="none"
-          autoCorrect={false}
-          spellCheck={false}
-          returnKeyType="go"
-          style={{ flex: 1, color: TERM.fg, fontFamily: MONO, fontSize: 14, minHeight: 40 }}
-        />
-        {running ? (
-          <Pressable onPress={running.kill} style={{ paddingHorizontal: 12, minHeight: 36, justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: TERM.err }}>
-            <Text style={{ color: TERM.err, fontWeight: '600' }}>Stop</Text>
-          </Pressable>
-        ) : (
-          <Pressable onPress={run} style={{ paddingHorizontal: 14, minHeight: 36, justifyContent: 'center', borderRadius: 18, backgroundColor: theme.accent }}>
-            <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Run</Text>
-          </Pressable>
-        )}
+      <TerminalLog text={log} style={{ marginHorizontal: 16, marginTop: 12, marginBottom: 8 }} />
+      <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: bottom, borderTopWidth: 1, borderTopColor: theme.border, backgroundColor: theme.bg }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+          <IconButton name="arrow-up" label="Previous command" onPress={() => recall(1)} size={18} />
+          <IconButton name="arrow-down" label="Next command" onPress={() => recall(-1)} size={18} />
+          <View
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              minHeight: SIZE.controlMd + 8,
+              paddingLeft: 14,
+              paddingRight: 4,
+              borderRadius: RADIUS.lg,
+              borderWidth: 1,
+              borderColor: theme.borderStrong,
+              backgroundColor: term.bg,
+            }}
+          >
+            <Text style={{ color: term.prompt, fontFamily: FONT.mono, fontSize: 14 }} accessibilityElementsHidden importantForAccessibility="no">
+              $
+            </Text>
+            <TextInput
+              value={input}
+              onChangeText={setInput}
+              onSubmitEditing={run}
+              submitBehavior="submit"
+              placeholder={running ? 'running…' : 'command'}
+              placeholderTextColor={term.dim}
+              autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
+              returnKeyType="go"
+              accessibilityLabel="Command"
+              style={[
+                { flex: 1, minWidth: 0, color: term.fg, fontFamily: FONT.mono, fontSize: 14, minHeight: SIZE.controlMd, paddingVertical: 10 },
+                Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null,
+              ]}
+            />
+            {running ? (
+              <Pressable
+                onPress={running.kill}
+                accessibilityRole="button"
+                accessibilityLabel="Stop"
+                style={({ pressed }) => [
+                  { height: 40, paddingHorizontal: 16, justifyContent: 'center', borderRadius: RADIUS.pill, borderWidth: 1, borderColor: term.err },
+                  pressed && { backgroundColor: term.border },
+                ]}
+              >
+                <Text style={{ color: term.err, fontSize: 14, fontWeight: '600' }}>Stop</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={run}
+                accessibilityRole="button"
+                accessibilityLabel="Run"
+                accessibilityState={{ disabled: !canRun }}
+                style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                  { height: 40, paddingHorizontal: 16, justifyContent: 'center', borderRadius: RADIUS.pill },
+                  { backgroundColor: !canRun ? theme.fill : pressed ? theme.accentPress : hovered ? theme.accentHover : theme.accent },
+                ]}
+              >
+                <Text style={{ color: canRun ? theme.onAccent : theme.inkFaint, fontSize: 14, fontWeight: '600' }}>Run</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
       </View>
-    </View>
+    </KeyboardPadded>
   );
 }

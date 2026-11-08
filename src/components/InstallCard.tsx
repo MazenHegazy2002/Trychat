@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { ClaySwitch, Icon, PillButton } from './ui';
+import { ClaySwitch, Icon, PillButton, TextField } from './ui';
 import type { ToolApproval } from '../lib/store';
 import { useStore } from '../lib/store';
 import { parseRef, previewInstall, refName } from '../lib/storeTools';
 import type { InstallField, InstallPreview } from '../lib/storeTools';
-import { useTheme } from '../lib/theme';
+import { FONT, RADIUS, TYPE, shadow, useTheme } from '../lib/theme';
 import type { ToolCall } from '../lib/types';
-import { Text, TextInput } from './Text';
+import { Text } from './Text';
 
 interface Props {
   call: ToolCall;
@@ -33,7 +33,7 @@ export function InstallCard({ call, onApprove, onDeny }: Props) {
   }
 
   const done = call.status === 'done';
-  const tone = done ? theme.text : call.status === 'running' ? theme.text : call.status === 'denied' ? theme.muted : theme.danger;
+  const tone = call.status === 'denied' ? theme.inkMuted : call.status === 'error' ? theme.danger : theme.ink;
   const title =
     call.status === 'running'
       ? `Installing ${name}…`
@@ -43,21 +43,31 @@ export function InstallCard({ call, onApprove, onDeny }: Props) {
           ? `Didn’t install ${name}`
           : `Couldn’t install ${name}`;
   return (
-    <View style={[styles.step, { borderColor: theme.border }]}>
-      <Pressable onPress={() => setOpen((o) => !o)} style={styles.stepRow} accessibilityRole="button" accessibilityState={{ expanded: open }}>
+    <View style={[styles.step, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <Pressable
+        onPress={() => setOpen((o) => !o)}
+        style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.stepRow, (pressed || hovered) && { backgroundColor: theme.fill }]}
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        accessibilityState={{ expanded: open }}
+      >
         {call.status === 'running' ? (
-          <ActivityIndicator size="small" color={theme.muted} />
+          <ActivityIndicator size="small" color={theme.inkMuted} />
         ) : (
-          <Icon name={done ? 'check-circle' : call.status === 'denied' ? 'slash' : 'alert-circle'} size={16} color={done ? theme.accent : tone} />
+          <Icon
+            name={done ? 'check-circle' : call.status === 'denied' ? 'slash' : 'alert-circle'}
+            size={16}
+            color={done ? theme.success : call.status === 'denied' ? theme.inkMuted : theme.danger}
+          />
         )}
-        <Text style={{ color: tone, flex: 1, fontSize: 14 }} numberOfLines={open ? undefined : 1}>
+        <Text style={{ color: tone, flex: 1, fontSize: 14, lineHeight: 20 }} numberOfLines={open ? undefined : 1}>
           {title}
         </Text>
-        {!!call.result && <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} />}
+        {!!call.result && <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={theme.inkFaint} />}
       </Pressable>
       {open && !!call.result && (
         <ScrollView style={[styles.output, { backgroundColor: theme.codeBg }]} nestedScrollEnabled>
-          <Text selectable style={[styles.mono, { color: theme.codeText }]}>
+          <Text selectable style={[styles.mono, { color: theme.codeInk }]}>
             {call.result}
           </Text>
         </ScrollView>
@@ -145,12 +155,11 @@ function PendingInstall({
     });
   };
 
-  const input = [styles.input, { backgroundColor: theme.bg, color: theme.text, borderColor: theme.border }];
   const renderField = (f: InstallField) => (
     <View key={f.key} style={{ marginTop: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        {f.secret && <Icon name="lock" size={13} color={theme.faint} />}
-        <Text style={{ color: theme.text, fontSize: 13, fontWeight: '600' }}>
+      <View style={styles.fieldLabel}>
+        {f.secret && <Icon name="lock" size={13} color={theme.inkFaint} />}
+        <Text style={{ color: theme.inkMuted, fontSize: 13, lineHeight: 18, fontWeight: '500' }}>
           {f.label}
           {f.required ? '' : ' (optional)'}
         </Text>
@@ -163,72 +172,77 @@ function PendingInstall({
         />
       ) : f.choices?.length ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          {f.choices.map((c) => (
-            <Pressable
-              key={c}
-              onPress={() => setValues((x) => ({ ...x, [f.key]: c }))}
-              style={[styles.choice, { borderColor: theme.border, backgroundColor: values[f.key] === c ? theme.oat : theme.surface }]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: values[f.key] === c }}
-            >
-              <Text style={{ color: theme.text }}>{c}</Text>
-            </Pressable>
-          ))}
+          {f.choices.map((c) => {
+            const on = values[f.key] === c;
+            return (
+              <Pressable
+                key={c}
+                onPress={() => setValues((x) => ({ ...x, [f.key]: c }))}
+                hitSlop={2}
+                style={[styles.choice, { backgroundColor: on ? theme.accentSoft : theme.fill, borderColor: on ? theme.accent : 'transparent' }]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+              >
+                <Text style={{ color: theme.ink, fontSize: 14, lineHeight: 20, fontWeight: on ? '600' : '500' }}>{c}</Text>
+              </Pressable>
+            );
+          })}
         </View>
       ) : (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <TextInput
-            value={values[f.key] ?? ''}
-            onChangeText={(t) => setValues((x) => ({ ...x, [f.key]: t }))}
-            secureTextEntry={f.secret && !shown[f.key]}
-            keyboardType={f.type === 'number' ? 'numeric' : 'default'}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder={f.secret ? 'Stays on this device' : undefined}
-            placeholderTextColor={theme.faint}
-            accessibilityLabel={f.label}
-            style={[input, { flex: 1 }]}
-          />
-          {f.secret && (
-            <Pressable
-              onPress={() => setShown((s) => ({ ...s, [f.key]: !s[f.key] }))}
-              hitSlop={8}
-              style={styles.eye}
-              accessibilityRole="button"
-              accessibilityLabel={shown[f.key] ? 'Hide' : 'Show'}
-            >
-              <Icon name={shown[f.key] ? 'eye-off' : 'eye'} size={18} />
-            </Pressable>
-          )}
-        </View>
+        <TextField
+          value={values[f.key] ?? ''}
+          onChangeText={(t) => setValues((x) => ({ ...x, [f.key]: t }))}
+          secureTextEntry={f.secret && !shown[f.key]}
+          keyboardType={f.type === 'number' ? 'numeric' : 'default'}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder={f.secret ? 'Stays on this device' : undefined}
+          accessibilityLabel={f.label}
+          right={
+            f.secret ? (
+              <Pressable
+                onPress={() => setShown((s) => ({ ...s, [f.key]: !s[f.key] }))}
+                hitSlop={4}
+                style={styles.eye}
+                accessibilityRole="button"
+                accessibilityLabel={shown[f.key] ? 'Hide' : 'Show'}
+              >
+                <Icon name={shown[f.key] ? 'eye-off' : 'eye'} size={18} />
+              </Pressable>
+            ) : undefined
+          }
+        />
       )}
-      {!!f.description && <Text style={{ color: theme.faint, fontSize: 12, marginTop: 4, lineHeight: 16 }}>{f.description}</Text>}
+      {!!f.description && <Text style={{ color: theme.inkFaint, fontSize: 13, lineHeight: 18, marginTop: 6 }}>{f.description}</Text>}
     </View>
   );
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-      <Text style={{ color: theme.muted, fontSize: 13 }}>
-        Store · {parsed ? KIND_TEXT[parsed.kind] : 'Install'} · needs your OK
-      </Text>
-      <Text style={{ color: theme.text, fontSize: 17, fontWeight: '600', marginTop: 4 }}>Install {preview?.name ?? refName(ref_)}?</Text>
+    <View style={[styles.card, { backgroundColor: theme.surfaceRaised, borderColor: theme.warning }, shadow(theme, 'raised')]}>
+      <View style={styles.ask}>
+        <Icon name="package" size={16} color={theme.warning} />
+        <Text style={{ color: theme.warning, fontSize: 13, lineHeight: 18, fontWeight: '600' }}>
+          Store · {parsed ? KIND_TEXT[parsed.kind] : 'Install'} · needs your OK
+        </Text>
+      </View>
+      <Text style={[TYPE.headline, { color: theme.ink, marginTop: 8 }]}>Install {preview?.name ?? refName(ref_)}?</Text>
       {!!preview && (
-        <Text style={{ color: theme.faint, fontSize: 12, marginTop: 2 }} numberOfLines={2}>
+        <Text style={{ color: theme.inkFaint, fontFamily: FONT.mono, fontSize: 12, lineHeight: 16, marginTop: 2 }} numberOfLines={2}>
           {preview.source}
           {preview.version ? ` · v${preview.version}` : ''}
         </Text>
       )}
       {!!reason && (
-        <View style={[styles.reason, { backgroundColor: theme.surface2 }]}>
-          <Text style={{ color: theme.muted, fontSize: 12, fontWeight: '600' }}>Why the assistant wants it</Text>
-          <Text style={{ color: theme.text, fontSize: 14, marginTop: 2, lineHeight: 20 }}>{reason}</Text>
+        <View style={[styles.reason, { backgroundColor: theme.fill }]}>
+          <Text style={{ color: theme.inkMuted, fontSize: 12, lineHeight: 16, fontWeight: '600' }}>Why the assistant wants it</Text>
+          <Text style={{ color: theme.ink, fontSize: 14, marginTop: 2, lineHeight: 20 }}>{reason}</Text>
         </View>
       )}
 
       {!preview && !error && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}>
-          <ActivityIndicator size="small" color={theme.muted} />
-          <Text style={{ color: theme.muted, fontSize: 13 }}>Checking what it adds…</Text>
+          <ActivityIndicator size="small" color={theme.inkMuted} />
+          <Text style={{ color: theme.inkMuted, fontSize: 13, lineHeight: 18 }}>Checking what it adds…</Text>
         </View>
       )}
       {!!error && <Text style={{ color: theme.danger, marginTop: 12, lineHeight: 20 }}>{error}</Text>}
@@ -236,11 +250,11 @@ function PendingInstall({
       {!!preview && (
         <>
           {!!preview.description && (
-            <Text style={{ color: theme.text, fontSize: 14, marginTop: 10, lineHeight: 20 }} numberOfLines={4}>
+            <Text style={{ color: theme.ink, fontSize: 14, marginTop: 10, lineHeight: 20 }} numberOfLines={4}>
               {preview.description}
             </Text>
           )}
-          <Text style={[styles.heading, { color: theme.muted }]}>What it adds</Text>
+          <Text style={[TYPE.overline, styles.heading, { color: theme.inkFaint }]}>What it adds</Text>
           {preview.adds.map((a) => (
             <Bullet key={a} icon="plus" text={a} />
           ))}
@@ -251,7 +265,7 @@ function PendingInstall({
           {installed && <Bullet icon="check" text="Already installed — installing again updates it." />}
           {fields.length > 0 && (
             <>
-              <Text style={[styles.heading, { color: theme.muted }]}>
+              <Text style={[TYPE.overline, styles.heading, { color: theme.inkFaint }]}>
                 {fields.some((f) => f.secret) ? 'Keys and settings (keys stay on this device)' : 'Settings'}
               </Text>
               {fields.map(renderField)}
@@ -261,18 +275,22 @@ function PendingInstall({
       )}
 
       <View style={styles.buttons}>
+        <PillButton title="Not now" variant="secondary" onPress={onDeny} disabled={sent} style={styles.button} />
         {error ? (
-          <PillButton title="Try again" onPress={() => {
+          <PillButton
+            title="Try again"
+            onPress={() => {
               setError('');
               setAttempt((n) => n + 1);
-            }} style={styles.button} />
+            }}
+            style={styles.button}
+          />
         ) : (
           <PillButton title="Install" icon="download" onPress={install} disabled={!canInstall} loading={sent} style={styles.button} />
         )}
-        <PillButton title="Not now" variant="secondary" onPress={onDeny} disabled={sent} style={styles.button} />
       </View>
       {!!preview && missing.length > 0 && (
-        <Text style={{ color: theme.faint, fontSize: 12, marginTop: 8 }}>Fill in {missing.map((f) => f.label).join(', ')} to install.</Text>
+        <Text style={{ color: theme.inkFaint, fontSize: 13, lineHeight: 18, marginTop: 8 }}>Fill in {missing.map((f) => f.label).join(', ')} to install.</Text>
       )}
     </View>
   );
@@ -282,24 +300,25 @@ function Bullet({ icon, text }: { icon: 'plus' | 'globe' | 'smartphone' | 'alert
   const theme = useTheme();
   return (
     <View style={styles.bullet}>
-      <Icon name={icon} size={14} color={icon === 'alert-triangle' ? theme.danger : theme.muted} />
-      <Text style={{ color: theme.text, fontSize: 14, lineHeight: 20, flex: 1 }}>{text}</Text>
+      <Icon name={icon} size={16} color={icon === 'alert-triangle' ? theme.danger : theme.inkMuted} style={{ marginTop: 2 }} />
+      <Text style={{ color: theme.ink, fontSize: 14, lineHeight: 20, flex: 1 }}>{text}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 16, padding: 14, marginTop: 8 },
-  step: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, marginTop: 8, overflow: 'hidden' },
-  stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, minHeight: 44 },
-  output: { maxHeight: 220, borderRadius: 10, margin: 8, marginTop: 0 },
-  mono: { fontFamily: 'monospace', fontSize: 12, lineHeight: 18, padding: 10 },
-  reason: { borderRadius: 10, padding: 10, marginTop: 10 },
-  heading: { fontSize: 12, fontWeight: '600', marginTop: 14, marginBottom: 2 },
+  card: { borderWidth: 1, borderRadius: RADIUS.md, padding: 16, marginTop: 8 },
+  ask: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  step: { borderWidth: 1, borderRadius: RADIUS.md, marginTop: 8, overflow: 'hidden' },
+  stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, minHeight: 48 },
+  output: { maxHeight: 220, borderRadius: RADIUS.sm, margin: 8, marginTop: 0 },
+  mono: { fontFamily: FONT.monoMedium, fontSize: 12, lineHeight: 18, padding: 12 },
+  reason: { borderRadius: RADIUS.sm, padding: 12, marginTop: 12 },
+  heading: { marginTop: 16, marginBottom: 2 },
   bullet: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginTop: 6 },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, minHeight: 44 },
+  fieldLabel: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   eye: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  choice: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, minHeight: 40, justifyContent: 'center' },
-  buttons: { flexDirection: 'row', gap: 10, marginTop: 16, flexWrap: 'wrap' },
-  button: { minHeight: 44, paddingHorizontal: 20 },
+  choice: { borderWidth: 1, borderRadius: RADIUS.pill, paddingHorizontal: 14, minHeight: 40, justifyContent: 'center' },
+  buttons: { flexDirection: 'row', gap: 8, marginTop: 16, flexWrap: 'wrap' },
+  button: { flexGrow: 1, flexBasis: 120 },
 });

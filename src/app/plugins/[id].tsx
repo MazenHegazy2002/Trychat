@@ -2,17 +2,26 @@ import { Stack, router, useLocalSearchParams, useNavigation } from 'expo-router'
 import { usePreventRemove } from 'expo-router/react-navigation';
 import type { ReactNode } from 'react';
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import type { ViewStyle } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
-import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, SectionLabel } from '../../components/ui';
+import { Text } from '../../components/Text';
+import { Banner, Card, Chip, ClaySwitch, Divider, EmptyState, Icon, IconTile, PillButton, SectionLabel, StatusBadge, TextField } from '../../components/ui';
 import { missingConfig, substituteConfig, pluginOrigin } from '../../lib/plugins';
 import { useStore } from '../../lib/store';
-import { useTheme } from '../../lib/theme';
+import { FONT, RADIUS, SIZE, SPACE, TYPE, WIDE_BREAKPOINT, useTheme } from '../../lib/theme';
 import type { Plugin, PluginConfigField } from '../../lib/types';
-import { Text, TextInput } from '../../components/Text';
 
 type Draft = Record<string, string | boolean>;
+type PressState = { pressed: boolean; hovered?: boolean };
+
+/** The content column: 16px gutters on phones; on wide screens 24px gutters, at most 760 wide and centred. */
+function useColumn(): ViewStyle {
+  const { width } = useWindowDimensions();
+  const gutter = width >= WIDE_BREAKPOINT ? SPACE[6] : SPACE[4];
+  return { width: '100%', maxWidth: SIZE.contentMax + gutter * 2, alignSelf: 'center', paddingHorizontal: gutter };
+}
 
 function safeDecode(s: string): string {
   try {
@@ -101,7 +110,9 @@ export default function PluginScreen() {
     return (
       <View style={[styles.center, { backgroundColor: theme.bg }]}>
         <Stack.Screen options={{ title: '' }} />
-        <Text style={{ color: theme.muted }}>This plugin isn’t installed anymore.</Text>
+        <EmptyState icon="layers" title="This plugin isn’t installed anymore">
+          You can add it again from the Store.
+        </EmptyState>
       </View>
     );
   }
@@ -129,7 +140,7 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
     plugin.userConfig.map((f) => [f.key, fieldError(f, valueOf(f))] as const).filter(([, e]) => !!e),
   ) as Record<string, string>;
   const hasErrors = Object.keys(errors).length > 0;
-  const input = [styles.input, { backgroundColor: theme.bg, color: theme.text, borderColor: theme.border }];
+  const column = useColumn();
 
   const setField = (f: PluginConfigField, value: string | boolean) => {
     if (savesInstantly(f)) {
@@ -188,117 +199,122 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
 
   const renderField = (f: PluginConfigField) => {
     const value = valueOf(f);
+    const title = f.title || f.key;
     const label = (
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>{f.title || f.key}</Text>
-        {f.required && <Text style={{ color: theme.primary, fontSize: 12, fontWeight: '600' }}>Required</Text>}
-        {f.sensitive && <Icon name="lock" size={13} color={theme.faint} />}
+      <View style={styles.fieldLabel}>
+        <Text style={[TYPE.callout, styles.medium, { color: theme.ink }]}>{title}</Text>
+        {f.required && <StatusBadge tone="neutral">Required</StatusBadge>}
+        {f.sensitive && <Icon name="lock" size={14} color={theme.inkFaint} />}
       </View>
     );
     const description = !!f.description && (
-      <Text style={{ color: theme.muted, fontSize: 13, lineHeight: 18, marginTop: 2 }}>{f.description}</Text>
+      <Text style={[TYPE.caption, styles.gap2, { color: theme.inkMuted }]}>{f.description}</Text>
     );
 
     if (f.type === 'boolean') {
       return (
-        <View style={[styles.fieldRow, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
-          <View style={{ flex: 1 }}>
+        <View style={[styles.fieldRow, styles.switchField]}>
+          <View style={styles.flex1}>
             {label}
             {description}
           </View>
-          <ClaySwitch value={value === true} onValueChange={(v) => setField(f, v)} label={f.title || f.key} />
+          <ClaySwitch value={value === true} onValueChange={(v) => setField(f, v)} label={title} />
         </View>
       );
     }
 
     const text = typeof value === 'string' ? value : '';
-    let control: ReactNode;
     if (f.options?.length && !f.sensitive) {
       const picked = f.multiple ? text.split(',').map((s) => s.trim()).filter(Boolean) : [text];
-      control = (
-        <View style={styles.options}>
-          {f.options.map((opt) => {
-            const on = picked.includes(opt);
-            const choose = () => {
-              if (f.multiple) {
-                const next = on ? picked.filter((p) => p !== opt) : [...picked, opt];
-                setField(f, next.join(','));
-              } else {
-                setField(f, on && !f.required ? '' : opt);
-              }
-            };
-            return (
-              <Pressable
-                key={opt}
-                onPress={choose}
-                hitSlop={6}
-                accessibilityRole={f.multiple ? 'checkbox' : 'radio'}
-                accessibilityState={{ checked: on }}
-                style={[
-                  styles.option,
-                  on ? { backgroundColor: theme.text, borderColor: theme.text } : { backgroundColor: theme.surface2, borderColor: theme.border },
-                ]}
-              >
-                {on && <Icon name="check" size={14} color={theme.bg} />}
-                <Text style={{ color: on ? theme.bg : theme.text, fontSize: 14 }}>{opt}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      );
-    } else {
-      const shown = !!revealed[f.key];
-      control = (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 }}>
-          <TextInput
-            value={text}
-            onChangeText={(v) => setField(f, v)}
-            placeholder={
-              f.type === 'number'
-                ? rangeHint(f) ?? 'Number'
-                : f.type === 'directory'
-                  ? 'Folder path'
-                  : f.type === 'file'
-                    ? 'File path'
-                    : f.multiple
-                      ? 'Separate values with commas'
-                      : f.sensitive && f.default !== undefined
-                        ? `Default: ${f.default}`
-                        : ''
-            }
-            placeholderTextColor={theme.faint}
-            keyboardType={f.type === 'number' ? 'numeric' : 'default'}
-            secureTextEntry={!!f.sensitive && !shown}
-            autoCapitalize="none"
-            autoCorrect={false}
-            accessibilityLabel={f.title || f.key}
-            style={[input, { flex: 1 }, (f.type === 'directory' || f.type === 'file') && { fontFamily: 'monospace', fontSize: 14 }]}
-          />
-          {f.sensitive && (
-            <Pressable
-              onPress={() => setRevealed((r) => ({ ...r, [f.key]: !shown }))}
-              style={styles.iconBtn}
-              accessibilityRole="button"
-              accessibilityLabel={shown ? `Hide ${f.title || f.key}` : `Show ${f.title || f.key}`}
-            >
-              <Icon name={shown ? 'eye-off' : 'eye'} size={18} />
-            </Pressable>
+      return (
+        <View style={styles.fieldRow}>
+          {label}
+          {description}
+          <View style={styles.options}>
+            {f.options.map((opt) => {
+              const on = picked.includes(opt);
+              const choose = () => {
+                if (f.multiple) {
+                  const next = on ? picked.filter((p) => p !== opt) : [...picked, opt];
+                  setField(f, next.join(','));
+                } else {
+                  setField(f, on && !f.required ? '' : opt);
+                }
+              };
+              return (
+                <Pressable
+                  key={opt}
+                  onPress={choose}
+                  hitSlop={4}
+                  accessibilityRole={f.multiple ? 'checkbox' : 'radio'}
+                  accessibilityState={{ checked: on }}
+                  style={({ pressed, hovered }: PressState) => [
+                    styles.option,
+                    on
+                      ? { backgroundColor: theme.accentSoft, borderColor: theme.accent }
+                      : { backgroundColor: pressed || hovered ? theme.fill : 'transparent', borderColor: theme.borderStrong },
+                  ]}
+                >
+                  {on && <Icon name="check" size={16} color={theme.accent} />}
+                  <Text style={[TYPE.subhead, { color: theme.ink }, on && styles.semibold]}>{opt}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {errors[f.key] ? (
+            <Text style={[TYPE.caption, styles.fieldNote, { color: theme.danger }]}>{errors[f.key]}</Text>
+          ) : (
+            f.type === 'number' &&
+            !!rangeHint(f) && <Text style={[TYPE.caption, styles.fieldNote, { color: theme.inkFaint }]}>{rangeHint(f)}</Text>
           )}
         </View>
       );
     }
 
+    const shown = !!revealed[f.key];
     return (
       <View style={styles.fieldRow}>
         {label}
         {description}
-        {control}
-        {errors[f.key] ? (
-          <Text style={{ color: theme.danger, fontSize: 12, marginTop: 6 }}>{errors[f.key]}</Text>
-        ) : (
-          f.type === 'number' &&
-          !!rangeHint(f) && <Text style={{ color: theme.faint, fontSize: 12, marginTop: 6 }}>{rangeHint(f)}</Text>
-        )}
+        <TextField
+          value={text}
+          onChangeText={(v) => setField(f, v)}
+          placeholder={
+            f.type === 'number'
+              ? rangeHint(f) ?? 'Number'
+              : f.type === 'directory'
+                ? 'Folder path'
+                : f.type === 'file'
+                  ? 'File path'
+                  : f.multiple
+                    ? 'Separate values with commas'
+                    : f.sensitive && f.default !== undefined
+                      ? `Default: ${f.default}`
+                      : ''
+          }
+          keyboardType={f.type === 'number' ? 'numeric' : 'default'}
+          secureTextEntry={!!f.sensitive && !shown}
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel={title}
+          mono={f.type === 'directory' || f.type === 'file'}
+          error={errors[f.key]}
+          hint={f.type === 'number' ? rangeHint(f) : undefined}
+          style={styles.control}
+          right={
+            f.sensitive ? (
+              <Pressable
+                onPress={() => setRevealed((r) => ({ ...r, [f.key]: !shown }))}
+                hitSlop={4}
+                style={styles.reveal}
+                accessibilityRole="button"
+                accessibilityLabel={shown ? `Hide ${title}` : `Show ${title}`}
+              >
+                <Text style={[TYPE.subhead, { color: theme.accent }]}>{shown ? 'Hide' : 'Show'}</Text>
+              </Pressable>
+            ) : undefined
+          }
+        />
       </View>
     );
   };
@@ -306,57 +322,57 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
   const hasSensitive = plugin.userConfig.some((f) => f.sensitive);
 
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
-      <Stack.Screen
-        options={{
-          title: '',
-          headerRight: () => (
-            <Pressable onPress={confirmUninstall} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel="Uninstall plugin">
-              <Icon name="trash-2" size={20} color={theme.muted} />
-            </Pressable>
-          ),
-        }}
-      />
+    <KeyboardAwareScrollView
+      style={{ backgroundColor: theme.bg }}
+      contentContainerStyle={[column, styles.page]}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+    >
+      <Stack.Screen options={{ title: '' }} />
 
-      <IconTile name="package" size={48} />
-      <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 28, lineHeight: 34, marginTop: 12 }}>{name}</Text>
+      <View style={styles.head}>
+        <IconTile name="layers" size={56} />
+        <View style={styles.headText}>
+          <Text style={[TYPE.title, { color: theme.ink }]} accessibilityRole="header">
+            {name}
+          </Text>
+          {!!plugin.author && <Text style={[TYPE.caption, { color: theme.inkMuted }]}>By {plugin.author}</Text>}
+        </View>
+      </View>
       {(!!plugin.version || !!plugin.marketplace) && (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 8 }}>
+        <View style={styles.metaRow}>
           {!!plugin.version && <Chip>v{plugin.version}</Chip>}
-          {!!plugin.marketplace && (
-            <Text style={{ color: theme.muted, fontSize: 13 }}>From {pluginOrigin(plugin)}</Text>
-          )}
+          {!!plugin.marketplace && <Text style={[TYPE.caption, { color: theme.inkMuted }]}>From {pluginOrigin(plugin)}</Text>}
         </View>
       )}
-      {!!plugin.description && (
-        <Text style={{ color: theme.text, fontSize: 15, lineHeight: 22, marginTop: 12 }}>{plugin.description}</Text>
-      )}
-      {!!plugin.author && <Text style={{ color: theme.muted, fontSize: 13, marginTop: 8 }}>By {plugin.author}</Text>}
-      <Pressable
-        onPress={() => open(sourceUrl(plugin.source))}
-        style={styles.linkRow}
-        accessibilityRole="link"
-        accessibilityLabel={`Open source: ${plugin.source}`}
-      >
-        <Icon name="github" size={15} color={theme.primary} />
-        <Text style={{ color: theme.primary, fontSize: 13, fontFamily: 'monospace', flex: 1 }} numberOfLines={1}>
-          {plugin.source.replace(/^https?:\/\//, '')}
-        </Text>
-      </Pressable>
-      {!!plugin.homepage && (
-        <Pressable onPress={() => open(plugin.homepage!)} style={styles.linkRow} accessibilityRole="link" accessibilityLabel="Open website">
-          <Icon name="external-link" size={15} color={theme.primary} />
-          <Text style={{ color: theme.primary, fontSize: 13, flex: 1 }} numberOfLines={1}>
-            Website
+      {!!plugin.description && <Text style={[TYPE.callout, styles.descr, { color: theme.ink }]}>{plugin.description}</Text>}
+      <View style={styles.links}>
+        <Pressable
+          onPress={() => open(sourceUrl(plugin.source))}
+          style={styles.linkRow}
+          accessibilityRole="link"
+          accessibilityLabel={`Open source: ${plugin.source}`}
+        >
+          <Icon name="github" size={16} color={theme.accent} />
+          <Text style={[TYPE.code, styles.flex1, { color: theme.accent }]} numberOfLines={1}>
+            {plugin.source.replace(/^https?:\/\//, '')}
           </Text>
         </Pressable>
-      )}
+        {!!plugin.homepage && (
+          <Pressable onPress={() => open(plugin.homepage!)} style={styles.linkRow} accessibilityRole="link" accessibilityLabel="Open website">
+            <Icon name="external-link" size={16} color={theme.accent} />
+            <Text style={[TYPE.subhead, styles.flex1, { color: theme.accent }]} numberOfLines={1}>
+              Website
+            </Text>
+          </Pressable>
+        )}
+      </View>
 
-      <Card style={{ marginTop: 16 }}>
+      <Card style={styles.block}>
         <View style={styles.switchRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>Enabled</Text>
-            <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>
+          <View style={styles.flex1}>
+            <Text style={[TYPE.callout, styles.medium, { color: theme.ink }]}>Enabled</Text>
+            <Text style={[TYPE.caption, { color: theme.inkMuted }]}>
               {plugin.enabled ? 'Available in your chats.' : 'Off — nothing from this plugin is used.'}
             </Text>
           </View>
@@ -365,17 +381,9 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
       </Card>
 
       {missing.length > 0 && (
-        <Card style={{ marginTop: 12, padding: 14, backgroundColor: theme.surface2 }}>
-          <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
-            <Icon name="alert-triangle" size={18} color={theme.primary} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>Needs setup</Text>
-              <Text style={{ color: theme.muted, fontSize: 13, lineHeight: 18, marginTop: 2 }}>
-                Add {missing.join(', ')} under Settings below so this plugin works.
-              </Text>
-            </View>
-          </View>
-        </Card>
+        <Banner tone="warning" title="Needs setup" style={styles.blockSm}>
+          Add {missing.join(', ')} under Settings below so this plugin works.
+        </Banner>
       )}
 
       {plugin.userConfig.length > 0 && (
@@ -390,24 +398,24 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
             ))}
           </Card>
           {hasSensitive && (
-            <View style={[styles.noteRow, { marginTop: 8 }]}>
-              <Icon name="lock" size={13} color={theme.faint} />
-              <Text style={{ color: theme.faint, fontSize: 12, flex: 1 }}>Sensitive values stay on this device.</Text>
+            <View style={[styles.noteRow, styles.blockXs]}>
+              <Icon name="lock" size={14} color={theme.inkFaint} />
+              <Text style={[TYPE.caption, styles.flex1, { color: theme.inkFaint }]}>Sensitive values stay on this device.</Text>
             </View>
           )}
           {typed.length > 0 && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 }}>
+            <View style={styles.saveRow}>
               <PillButton title="Save settings" onPress={save} disabled={!dirty || hasErrors} />
               {justSaved && !dirty && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Icon name="check" size={15} color={theme.accent} />
-                  <Text style={{ color: theme.muted, fontSize: 13 }}>Saved</Text>
+                <View style={styles.noteRow}>
+                  <Icon name="check" size={16} color={theme.success} />
+                  <Text style={[TYPE.caption, { color: theme.success }]}>Saved</Text>
                 </View>
               )}
             </View>
           )}
           {typed.length > 0 && typed.length < plugin.userConfig.length && (
-            <Text style={{ color: theme.faint, fontSize: 12, marginTop: 8 }}>Switches and choices are saved as soon as you change them.</Text>
+            <Text style={[TYPE.caption, styles.blockXs, { color: theme.inkFaint }]}>Switches and choices are saved as soon as you change them.</Text>
           )}
         </>
       )}
@@ -418,9 +426,9 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
             <View key={s.name}>
               {i > 0 && <Divider />}
               <View style={styles.itemRow}>
-                <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>{s.name}</Text>
+                <Text style={[TYPE.callout, styles.medium, { color: theme.ink }]}>{s.name}</Text>
                 {!!s.description && (
-                  <Text style={{ color: theme.muted, fontSize: 13, lineHeight: 18, marginTop: 2 }} numberOfLines={3}>
+                  <Text style={[TYPE.caption, styles.gap2, { color: theme.inkMuted }]} numberOfLines={3}>
                     {substituteConfig(s.description, plugin)}
                   </Text>
                 )}
@@ -436,12 +444,12 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
             <View key={c.name}>
               {i > 0 && <Divider />}
               <View style={styles.itemRow}>
-                <Text style={{ fontFamily: 'monospace', fontSize: 14 }}>
-                  <Text style={{ color: theme.text }}>/{c.name}</Text>
-                  {!!c.argumentHint && <Text style={{ color: theme.faint }}> {c.argumentHint}</Text>}
+                <Text style={styles.command}>
+                  <Text style={[styles.medium, { color: theme.ink }]}>/{c.name}</Text>
+                  {!!c.argumentHint && <Text style={{ color: theme.inkFaint }}> {c.argumentHint}</Text>}
                 </Text>
                 {!!c.description && (
-                  <Text style={{ color: theme.muted, fontSize: 13, lineHeight: 18, marginTop: 2 }} numberOfLines={3}>
+                  <Text style={[TYPE.caption, styles.gap2, { color: theme.inkMuted }]} numberOfLines={3}>
                     {substituteConfig(c.description, plugin)}
                   </Text>
                 )}
@@ -457,12 +465,12 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
             <View key={a.name}>
               {i > 0 && <Divider />}
               <View style={styles.itemRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>{a.name}</Text>
+                <View style={styles.titleRow}>
+                  <Text style={[TYPE.callout, styles.medium, { color: theme.ink }]}>{a.name}</Text>
                   {!!a.model && <Chip>{a.model}</Chip>}
                 </View>
                 {!!a.description && (
-                  <Text style={{ color: theme.muted, fontSize: 13, lineHeight: 18, marginTop: 2 }} numberOfLines={3}>
+                  <Text style={[TYPE.caption, styles.gap2, { color: theme.inkMuted }]} numberOfLines={3}>
                     {substituteConfig(a.description, plugin)}
                   </Text>
                 )}
@@ -482,35 +490,35 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
               <View key={m.name}>
                 {i > 0 && <Divider />}
                 <View style={styles.itemRow}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500', flexShrink: 1 }} numberOfLines={1}>
+                  <View style={[styles.titleRow, styles.noWrap]}>
+                    <Text style={[TYPE.callout, styles.medium, styles.shrink, { color: theme.ink }]} numberOfLines={1}>
                       {m.name}
                     </Text>
                     <Chip>{m.transport.toUpperCase()}</Chip>
                   </View>
-                  <Text style={{ color: theme.faint, fontSize: 12, fontFamily: 'monospace', marginTop: 2 }} numberOfLines={1}>
+                  <Text style={[styles.mono, styles.gap2, { color: theme.inkFaint }]} numberOfLines={1}>
                     {hostOf(substituteConfig(m.url, plugin))}
                   </Text>
                   {live && (
-                    <View style={[styles.noteRow, { marginTop: 6 }]}>
+                    <View style={[styles.noteRow, styles.status]}>
                       {error ? (
                         <>
                           <Icon name="alert-circle" size={14} color={theme.danger} />
-                          <Text style={{ color: theme.danger, fontSize: 12, flex: 1 }} numberOfLines={3}>
+                          <Text style={[styles.small, styles.flex1, { color: theme.danger }]} numberOfLines={3}>
                             {error}
                           </Text>
                         </>
                       ) : tools ? (
                         <>
-                          <Icon name="check-circle" size={14} color={theme.accent} />
-                          <Text style={{ color: theme.muted, fontSize: 12 }}>
+                          <Icon name="check-circle" size={14} color={theme.success} />
+                          <Text style={[styles.small, { color: theme.inkMuted }]}>
                             {tools.length} tool{tools.length === 1 ? '' : 's'}
                           </Text>
                         </>
                       ) : (
                         <>
-                          <ActivityIndicator size="small" color={theme.muted} />
-                          <Text style={{ color: theme.muted, fontSize: 12 }}>Connecting…</Text>
+                          <ActivityIndicator size="small" color={theme.inkMuted} />
+                          <Text style={[styles.small, { color: theme.inkMuted }]}>Connecting…</Text>
                         </>
                       )}
                     </View>
@@ -527,14 +535,23 @@ function PluginDetail({ plugin }: { plugin: Plugin }) {
           {plugin.unsupported.map((u, i) => (
             <View key={u}>
               {i > 0 && <Divider />}
-              <View style={[styles.itemRow, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
-                <Icon name="slash" size={15} color={theme.faint} />
-                <Text style={{ color: theme.muted, fontSize: 14, flex: 1 }}>{u}</Text>
+              <View style={[styles.itemRow, styles.unsupportedRow]}>
+                <Icon name="slash" size={16} color={theme.inkFaint} />
+                <Text style={[TYPE.subhead, styles.flex1, { color: theme.inkMuted }]}>{u}</Text>
               </View>
             </View>
           ))}
         </ContentSection>
       )}
+
+      <PillButton
+        title="Remove"
+        variant="danger"
+        icon="trash-2"
+        onPress={confirmUninstall}
+        accessibilityHint={`Uninstalls ${name} and removes its settings`}
+        style={styles.remove}
+      />
     </KeyboardAwareScrollView>
   );
 }
@@ -545,20 +562,54 @@ function ContentSection({ title, note, children }: { title: string; note: string
     <>
       <SectionLabel>{title}</SectionLabel>
       <Card>{children}</Card>
-      <Text style={{ color: theme.faint, fontSize: 12, marginTop: 6 }}>{note}</Text>
+      <Text style={[TYPE.caption, styles.blockXs, { color: theme.inkFaint }]}>{note}</Text>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  iconBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44 },
-  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 64, paddingVertical: 10 },
-  fieldRow: { paddingHorizontal: 16, paddingVertical: 14 },
-  itemRow: { paddingHorizontal: 16, paddingVertical: 12, minHeight: 52, justifyContent: 'center' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACE[6] },
+  flex1: { flex: 1 },
+  shrink: { flexShrink: 1 },
+  gap2: { marginTop: 2 },
+  medium: { fontWeight: '500' },
+  semibold: { fontWeight: '600' },
+  small: { fontSize: 12, lineHeight: 16 },
+  mono: { fontFamily: FONT.mono, fontSize: 12, lineHeight: 16 },
+  command: { fontFamily: FONT.mono, fontSize: 14, lineHeight: 20 },
+  page: { paddingTop: SPACE[4], paddingBottom: SPACE[12] },
+  head: { flexDirection: 'row', alignItems: 'center', gap: SPACE[4] },
+  headText: { flex: 1, minWidth: 0, gap: 2 },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: SPACE[2], marginTop: SPACE[3] },
+  descr: { marginTop: SPACE[3] },
+  links: { marginTop: SPACE[1] },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE[2], minHeight: SIZE.controlMd },
+  block: { marginTop: SPACE[4] },
+  blockSm: { marginTop: SPACE[3] },
+  blockXs: { marginTop: SPACE[2] },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE[3], paddingHorizontal: SPACE[4], minHeight: 64, paddingVertical: 10 },
+  fieldRow: { paddingHorizontal: SPACE[4], paddingVertical: 14 },
+  switchField: { flexDirection: 'row', alignItems: 'center', gap: SPACE[3] },
+  fieldLabel: { flexDirection: 'row', alignItems: 'center', gap: SPACE[2], flexWrap: 'wrap' },
+  fieldNote: { marginTop: 6 },
+  control: { marginTop: 10 },
+  reveal: { minHeight: SIZE.controlMd, paddingHorizontal: 10, justifyContent: 'center' },
+  options: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE[2], marginTop: 10 },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: SIZE.controlSm,
+    paddingHorizontal: 14,
+    borderRadius: RADIUS.pill,
+    borderWidth: 1,
+  },
+  saveRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE[3], marginTop: SPACE[3] },
+  itemRow: { paddingHorizontal: SPACE[4], paddingVertical: SPACE[3], minHeight: 52, justifyContent: 'center' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE[2], flexWrap: 'wrap' },
+  noWrap: { flexWrap: 'nowrap' },
+  unsupportedRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   noteRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  options: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  option: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1 },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 48 },
+  status: { marginTop: 6 },
+  remove: { marginTop: SPACE[8] },
 });

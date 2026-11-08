@@ -1,11 +1,12 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { Alert, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { FileCards } from '../components/FileCards';
 import { ShareToFriendSheet } from '../components/ShareToFriendSheet';
-import { Card, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel, TextAction } from '../components/ui';
+import { Banner, Card, Divider, EmptyState, Icon, IconButton, IconTile, PillButton, ScreenIntro, SectionLabel, SegmentedControl, TextAction, TextField } from '../components/ui';
 import type { IconName } from '../components/ui';
 import { formatSize, pickFiles } from '../lib/attachments';
 import {
@@ -21,9 +22,9 @@ import {
   unshareFile,
 } from '../lib/social';
 import { useStore } from '../lib/store';
-import { useTheme } from '../lib/theme';
+import { RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, useTheme } from '../lib/theme';
 import type { Account, Attachment, Friend, SharedFile } from '../lib/types';
-import { Text, TextInput } from '../components/Text';
+import { Text } from '../components/Text';
 
 function timeAgo(ts?: number) {
   if (!ts) return '';
@@ -35,7 +36,23 @@ function timeAgo(ts?: number) {
 }
 
 const iconFor = (mime: string): IconName =>
-  mime.startsWith('image/') ? 'image' : mime === 'application/pdf' || mime.startsWith('text/') ? 'file-text' : 'file';
+  mime.startsWith('image/')
+    ? 'image'
+    : mime === 'text/html'
+      ? 'globe'
+      : /spreadsheet|ms-excel|text\/csv/.test(mime)
+        ? 'grid'
+        : /presentation|powerpoint/.test(mime)
+          ? 'monitor'
+          : mime === 'application/pdf' || mime.startsWith('text/') || /wordprocessing|msword/.test(mime)
+            ? 'file-text'
+            : 'file';
+
+/** Phones: 16px gutter. From 900px: a centred 760px column. */
+function usePage() {
+  const wide = useWindowDimensions().width >= WIDE_BREAKPOINT;
+  return [styles.page, wide && styles.pageWide];
+}
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -46,26 +63,44 @@ export default function FriendsScreen() {
 
 function SignedOut() {
   const theme = useTheme();
+  const page = usePage();
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <ScreenIntro title="Friends">Send files to friends who have an account on your TryChat server.</ScreenIntro>
-      <Card style={{ padding: 20, alignItems: 'center' }}>
-        <IconTile name="users" size={44} />
-        <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600', marginTop: 12 }}>Sign in to add friends</Text>
-        <Text style={{ color: theme.muted, fontSize: 13, textAlign: 'center', marginTop: 4 }}>
+      <Card>
+        <EmptyState icon="users" title="Sign in to add friends" action={<PillButton title="Sign in" onPress={() => router.push('/account')} />}>
           Friends and shared files live in your account, so they follow you to every device.
-        </Text>
-        <PillButton title="Sign in" onPress={() => router.push('/account')} style={{ marginTop: 16, alignSelf: 'stretch' }} />
+        </EmptyState>
       </Card>
     </KeyboardAwareScrollView>
   );
 }
 
+/** A circle on `fill` with the person's initial. */
 function Avatar({ label }: { label: string }) {
   const theme = useTheme();
   return (
-    <View style={[styles.avatar, { backgroundColor: theme.oat }]}>
-      <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 16 }}>{label[0]?.toUpperCase()}</Text>
+    <View style={[styles.avatar, { backgroundColor: theme.fill }]}>
+      <Text style={{ color: theme.ink, fontSize: 15, fontWeight: '600' }}>{label[0]?.toUpperCase()}</Text>
+    </View>
+  );
+}
+
+/** A person in a list: avatar, name, a detail line and trailing actions. */
+function PersonRow({ label, title, detail, children }: { label: string; title: string; detail: string; children?: ReactNode }) {
+  const theme = useTheme();
+  return (
+    <View style={styles.row}>
+      <Avatar label={label} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[TYPE.callout, { color: theme.ink }]} numberOfLines={1}>
+          {title}
+        </Text>
+        <Text style={[TYPE.caption, { color: theme.inkMuted }]} numberOfLines={1}>
+          {detail}
+        </Text>
+      </View>
+      {children}
     </View>
   );
 }
@@ -195,18 +230,24 @@ function SignedIn({ account }: { account: Account }) {
   const incoming = friends.filter((f) => f.status === 'incoming');
   const outgoing = friends.filter((f) => f.status === 'outgoing');
   const files = tab === 'received' ? shared.received : shared.sent;
-  const input = [styles.input, { backgroundColor: theme.surface, color: theme.text, borderColor: theme.border }];
+  const page = usePage();
 
   return (
     <KeyboardAwareScrollView
       style={{ backgroundColor: theme.bg }}
-      contentContainerStyle={styles.page}
+      contentContainerStyle={page}
       keyboardShouldPersistTaps="handled"
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} colors={[theme.primary]} />}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.inkMuted} colors={[theme.inkMuted]} progressBackgroundColor={theme.surfaceRaised} />
+      }
       keyboardDismissMode="interactive"
     >
       <ScreenIntro title="Friends">Send files to friends who have an account on {account.serverUrl.replace(/^https?:\/\//, '')}.</ScreenIntro>
-      {!!error && <Text style={{ color: theme.danger, marginBottom: 8 }}>{error}</Text>}
+      {!!error && (
+        <Banner tone="danger" title="Couldn’t load your friends" style={{ borderWidth: 1, borderColor: theme.danger }}>
+          {error} Pull down to try again.
+        </Banner>
+      )}
 
       {incoming.length > 0 && (
         <>
@@ -214,20 +255,11 @@ function SignedIn({ account }: { account: Account }) {
           <Card>
             {incoming.map((f, i) => (
               <View key={f.id}>
-                {i > 0 && <Divider />}
-                <View style={styles.row}>
-                  <Avatar label={f.name || f.email} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: theme.text, fontSize: 15 }} numberOfLines={1}>
-                      {f.name || f.email}
-                    </Text>
-                    <Text style={{ color: theme.faint, fontSize: 12 }} numberOfLines={1}>
-                      {f.email} · {timeAgo(f.since)}
-                    </Text>
-                  </View>
+                {i > 0 && <Divider inset={64} />}
+                <PersonRow label={f.name || f.email} title={f.name || f.email} detail={`${f.email} · ${timeAgo(f.since)}`}>
                   <TextAction title="Decline" tone="ink" onPress={() => act(() => declineFriend(account, f.id))} />
                   <TextAction title="Accept" onPress={() => act(() => acceptFriend(account, f.id))} />
-                </View>
+                </PersonRow>
               </View>
             ))}
           </Card>
@@ -238,155 +270,139 @@ function SignedIn({ account }: { account: Account }) {
       <Card>
         {accepted.map((f, i) => (
           <View key={f.id}>
-            {i > 0 && <Divider />}
-            <View style={styles.row}>
-              <Avatar label={f.name || f.email} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.text, fontSize: 15 }} numberOfLines={1}>
-                  {f.name || f.email}
-                </Text>
-                <Text style={{ color: theme.faint, fontSize: 12 }} numberOfLines={1}>
-                  {f.email}
-                </Text>
-              </View>
-              <Pressable onPress={() => confirmRemove(f)} style={styles.iconBtn} accessibilityLabel={`Remove ${f.name || f.email}`}>
-                <Icon name="user-x" size={18} />
-              </Pressable>
-            </View>
+            {i > 0 && <Divider inset={64} />}
+            <PersonRow label={f.name || f.email} title={f.name || f.email} detail={f.email}>
+              <IconButton name="user-x" label={`Remove ${f.name || f.email}`} onPress={() => confirmRemove(f)} />
+            </PersonRow>
           </View>
         ))}
         {outgoing.map((f, i) => (
           <View key={f.id}>
-            {(i > 0 || accepted.length > 0) && <Divider />}
-            <View style={styles.row}>
-              <Avatar label={f.email} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.text, fontSize: 15 }} numberOfLines={1}>
-                  {f.email}
-                </Text>
-                <Text style={{ color: theme.faint, fontSize: 12 }}>Request sent {timeAgo(f.since)}</Text>
-              </View>
+            {(i > 0 || accepted.length > 0) && <Divider inset={64} />}
+            <PersonRow label={f.email} title={f.email} detail={`Request sent ${timeAgo(f.since)}`}>
               <TextAction title="Cancel" tone="ink" onPress={() => act(() => declineFriend(account, f.id))} />
-            </View>
+            </PersonRow>
           </View>
         ))}
         {loaded && !accepted.length && !outgoing.length && (
-          <Text style={{ color: theme.muted, fontSize: 13, padding: 16 }}>No friends yet. Add someone by the email they signed up with.</Text>
+          <Text style={[TYPE.callout, { color: theme.inkMuted, padding: 16 }]}>No friends yet. Add someone by the email they signed up with.</Text>
         )}
         <Divider />
-        <View style={{ padding: 12, gap: 8 }}>
+        <View style={{ padding: 16, gap: 8 }}>
+          <Text style={{ color: theme.inkMuted, fontSize: 13, lineHeight: 18, fontWeight: '500' }}>Add a friend</Text>
           <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-            <TextInput
+            <TextField
               value={email}
               onChangeText={setEmail}
               placeholder="friend@example.com"
-              placeholderTextColor={theme.faint}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
               onSubmitEditing={add}
-              style={[input, { flex: 1 }]}
+              style={{ flex: 1 }}
               accessibilityLabel="Friend's email"
             />
-            <PillButton title="Add" icon="user-plus" onPress={add} loading={adding} disabled={!email.trim()} style={{ minHeight: 44 }} />
+            <PillButton title="Add" icon="user-plus" onPress={add} loading={adding} disabled={!email.trim()} style={{ minHeight: 48 }} />
           </View>
-          {!!addInfo && <Text style={{ color: theme.muted, fontSize: 12 }}>{addInfo}</Text>}
+          {!!addInfo && <Text style={[TYPE.caption, { color: theme.inkMuted }]}>{addInfo}</Text>}
         </View>
       </Card>
 
-      <View style={[styles.segment, { backgroundColor: theme.surface2 }]}>
-        {(
-          [
-            ['received', `Shared with me · ${shared.received.length}`],
-            ['sent', `Shared by me · ${shared.sent.length}`],
-          ] as const
-        ).map(([key, title]) => (
-          <Pressable
-            key={key}
-            onPress={() => setTab(key)}
-            style={[styles.segmentItem, tab === key && { backgroundColor: theme.surface }]}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: tab === key }}
-          >
-            <Text style={{ color: tab === key ? theme.text : theme.muted, fontWeight: '600', fontSize: 13 }}>{title}</Text>
-          </Pressable>
-        ))}
-      </View>
+      <SectionLabel>Shared files</SectionLabel>
+      <SegmentedControl
+        label="Shared files"
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: 'received', label: `Shared with me · ${shared.received.length}` },
+          { value: 'sent', label: `Shared by me · ${shared.sent.length}` },
+        ]}
+        style={{ marginBottom: 12 }}
+      />
 
-      {accepted.length > 0 && (
-        <PillButton title="Send a file" icon="send" variant="secondary" onPress={sendFiles} style={{ marginBottom: 12 }} />
-      )}
+      {accepted.length > 0 && <PillButton title="Send a file" icon="send" variant="secondary" onPress={sendFiles} style={{ marginBottom: 12 }} />}
 
       {loaded && !files.length && (
-        <Text style={{ color: theme.muted, fontSize: 13 }}>
-          {tab === 'received' ? 'Nothing yet. Files friends send you show up here.' : 'You haven’t shared anything yet.'}
-        </Text>
+        <EmptyState icon={tab === 'received' ? 'inbox' : 'send'} title={tab === 'received' ? 'Nothing yet' : 'You haven’t shared anything yet'} style={{ paddingVertical: 24 }}>
+          {tab === 'received' ? 'Files friends send you show up here.' : undefined}
+        </EmptyState>
       )}
 
-      {files.map((file) => {
-        const local = downloads[file.id];
-        const p = progress[file.id];
-        return (
-          <Card key={file.id} style={{ padding: 14, marginBottom: 10 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <IconTile name={iconFor(file.mimeType)} size={36} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }} numberOfLines={1}>
-                  {file.name}
-                </Text>
-                <Text style={{ color: theme.faint, fontSize: 12 }} numberOfLines={1}>
-                  {tab === 'received' ? `From ${file.owner.name || file.owner.email} · ` : ''}
-                  {formatSize(file.size)} · {timeAgo(file.sharedAt ?? file.createdAt)}
-                </Text>
+      <View style={{ gap: 8 }}>
+        {files.map((file) => {
+          const local = downloads[file.id];
+          const p = progress[file.id];
+          return (
+            <View key={file.id} style={[styles.file, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <IconTile name={iconFor(file.mimeType)} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[TYPE.callout, { color: theme.ink, fontWeight: '500' }]} numberOfLines={1}>
+                    {file.name}
+                  </Text>
+                  <Text style={[TYPE.codeLabel, { color: theme.inkFaint, marginTop: 2 }]} numberOfLines={1}>
+                    {tab === 'received' ? `From ${file.owner.name || file.owner.email} · ` : ''}
+                    {formatSize(file.size)} · {timeAgo(file.sharedAt ?? file.createdAt)}
+                  </Text>
+                </View>
               </View>
-            </View>
-            {!!file.note && <Text style={{ color: theme.text, fontSize: 14, marginTop: 8 }}>“{file.note}”</Text>}
+              {!!file.note && (
+                <View style={[styles.note, { backgroundColor: theme.fill }]}>
+                  <Text style={[TYPE.callout, { color: theme.ink }]}>“{file.note}”</Text>
+                </View>
+              )}
 
-            {tab === 'received' ? (
-              <>
-                {local && (
-                  <View style={{ marginTop: 10 }}>
-                    <FileCards files={[local]} />
+              {tab === 'received' ? (
+                <>
+                  {local && (
+                    <View style={{ marginTop: 10 }}>
+                      <FileCards files={[local]} />
+                    </View>
+                  )}
+                  <View style={styles.actions}>
+                    {!local &&
+                      (p !== undefined ? (
+                        <Text style={[TYPE.caption, { color: theme.inkMuted }]}>Downloading… {Math.round(p * 100)}%</Text>
+                      ) : (
+                        <TextAction title="Download" onPress={() => download(file)} />
+                      ))}
+                    <TextAction title="Remove" tone="ink" onPress={() => fileAction(() => unshareFile(account, file.id))} />
                   </View>
-                )}
-                <View style={styles.actions}>
-                  {!local &&
-                    (p !== undefined ? (
-                      <Text style={{ color: theme.muted, fontSize: 13 }}>Downloading… {Math.round(p * 100)}%</Text>
-                    ) : (
-                      <TextAction title="Download" onPress={() => download(file)} />
+                </>
+              ) : (
+                <>
+                  <View style={styles.chips}>
+                    {(file.recipients ?? []).map((r) => (
+                      <Pressable
+                        key={r.id}
+                        onPress={() =>
+                          Alert.alert(`Stop sharing with ${r.name || r.email}?`, file.recipients?.length === 1 ? 'Nobody else has it, so it is deleted from the server.' : undefined, [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Stop sharing', style: 'destructive', onPress: () => fileAction(() => unshareFile(account, file.id, [r.id])) },
+                          ])
+                        }
+                        hitSlop={{ top: 6, bottom: 6 }}
+                        style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                          styles.chip,
+                          { backgroundColor: theme.fill, borderColor: pressed || hovered ? theme.borderStrong : theme.fill },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Stop sharing with ${r.name || r.email}`}
+                      >
+                        <Text style={[TYPE.caption, { color: theme.ink }]}>{r.name || r.email}</Text>
+                        <Icon name="x" size={14} />
+                      </Pressable>
                     ))}
-                  <TextAction title="Remove" tone="ink" onPress={() => fileAction(() => unshareFile(account, file.id))} />
-                </View>
-              </>
-            ) : (
-              <>
-                <View style={styles.chips}>
-                  {(file.recipients ?? []).map((r) => (
-                    <Pressable
-                      key={r.id}
-                      onPress={() =>
-                        Alert.alert(`Stop sharing with ${r.name || r.email}?`, file.recipients?.length === 1 ? 'Nobody else has it, so it is deleted from the server.' : undefined, [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Stop sharing', style: 'destructive', onPress: () => fileAction(() => unshareFile(account, file.id, [r.id])) },
-                        ])
-                      }
-                      style={[styles.chip, { backgroundColor: theme.surface2 }]}
-                      accessibilityLabel={`Stop sharing with ${r.name || r.email}`}
-                    >
-                      <Text style={{ color: theme.text, fontSize: 12 }}>{r.name || r.email}</Text>
-                      <Icon name="x" size={12} />
-                    </Pressable>
-                  ))}
-                </View>
-                <View style={styles.actions}>
-                  <TextAction title="Delete" tone="danger" onPress={() => confirmDelete(file)} />
-                </View>
-              </>
-            )}
-          </Card>
-        );
-      })}
+                  </View>
+                  <View style={styles.actions}>
+                    <TextAction title="Delete" tone="danger" onPress={() => confirmDelete(file)} />
+                  </View>
+                </>
+              )}
+            </View>
+          );
+        })}
+      </View>
 
       <ShareToFriendSheet
         visible={toSend.length > 0}
@@ -401,14 +417,13 @@ function SignedIn({ account }: { account: Account }) {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 20, paddingBottom: 48 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 60 },
+  page: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 48 },
+  pageWide: { width: '100%', maxWidth: SIZE.contentMax, alignSelf: 'center', paddingHorizontal: 24, paddingTop: 28 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 16, paddingRight: 8, paddingVertical: 8, minHeight: 60 },
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  iconBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, minHeight: 44 },
-  segment: { flexDirection: 'row', borderRadius: 999, padding: 4, marginTop: 24, marginBottom: 12 },
-  segmentItem: { flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 20, marginTop: 4 },
+  file: { borderWidth: 1, borderRadius: RADIUS.md, padding: 12 },
+  note: { marginTop: 10, borderRadius: RADIUS.sm, paddingHorizontal: 12, paddingVertical: 8 },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 20, marginTop: 4 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32, borderRadius: RADIUS.pill, borderWidth: 1, paddingHorizontal: 12 },
 });

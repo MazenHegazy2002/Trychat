@@ -1,12 +1,13 @@
 import { Stack, router } from 'expo-router';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { FlatList, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
-import { Icon } from '../components/ui';
+import { EmptyState, Icon, IconButton, PillButton, RunningDot, SegmentedControl, StatusBadge, TextAction } from '../components/ui';
 import type { IconName } from '../components/ui';
 import { useStore } from '../lib/store';
 import { cancelTask, clearTaskHistory } from '../lib/tasks';
 import type { Task, TaskKind } from '../lib/tasks';
-import { useTheme } from '../lib/theme';
+import { FONT, RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, useTheme } from '../lib/theme';
 import { laptopConnected } from '../lib/tools';
 import { formatElapsed, useTasks, useTicker } from '../lib/useTasks';
 import { Text } from '../components/Text';
@@ -21,40 +22,78 @@ const KIND_ICON: Record<TaskKind, IconName> = {
   sync: 'refresh-cw',
 };
 
-function TaskRow({ task, now }: { task: Task; now: number }) {
+/** Short live status for a running task: the newest output line, or what kind of work it is. */
+function liveStatus(task: Task, elapsed: string): string {
+  const lines = task.output.trimEnd().split('\n');
+  const lastLine = lines[lines.length - 1]?.replace(/\x1b\[[\d;]*[A-Za-z]/g, '').trim();
+  if (task.kind === 'command' && lastLine) return `${lastLine.slice(0, 80)} · ${elapsed}`;
+  if (task.output && task.kind !== 'command') return `Writing… ${lines.length} line${lines.length === 1 ? '' : 's'} · ${elapsed}`;
+  return `${task.kind} · ${elapsed}`;
+}
+
+/** A running task: Ember dot, title, a Geist Mono status line and Stop. */
+function RunningCard({ task, now }: { task: Task; now: number }) {
   const theme = useTheme();
-  const running = task.status === 'running';
-  const tone = task.status === 'failed' ? theme.danger : task.status === 'cancelled' ? theme.faint : theme.muted;
-  const when = running
-    ? formatElapsed(Math.max(now, task.startedAt) - task.startedAt)
-    : `${task.status === 'done' ? 'Done' : task.status === 'failed' ? 'Failed' : 'Stopped'} · ${formatElapsed((task.endedAt ?? task.startedAt) - task.startedAt)} · ${new Date(task.startedAt).toLocaleString()}`;
+  const elapsed = formatElapsed(Math.max(now, task.startedAt) - task.startedAt);
   return (
     <Pressable
       onPress={() => router.push(`/tasks/${task.id}`)}
-      style={({ pressed }) => [styles.row, { borderBottomColor: theme.border }, pressed && { opacity: 0.7 }]}
+      accessibilityRole="button"
+      accessibilityLabel={`${task.title}, running`}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.card,
+        { backgroundColor: pressed || hovered ? theme.fill : theme.surface, borderColor: theme.border },
+      ]}
     >
-      <View style={styles.icon}>
-        {running ? <ActivityIndicator size="small" color={theme.primary} /> : <Icon name={KIND_ICON[task.kind]} size={18} color={tone} />}
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text numberOfLines={2} style={{ color: theme.text, fontSize: 15 }}>
+      <RunningDot />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={2} style={[TYPE.callout, { color: theme.ink, fontWeight: '500' }]}>
           {task.title}
         </Text>
-        <Text numberOfLines={1} style={{ color: tone, fontSize: 12, marginTop: 2 }}>
-          {when}
-          {task.exitCode != null && !running ? ` · exit ${task.exitCode}` : ''}
+        <Text numberOfLines={1} style={[TYPE.codeLabel, { color: theme.inkMuted, fontFamily: FONT.mono }]}>
+          {liveStatus(task, elapsed)}
         </Text>
       </View>
-      {running && task.cancellable && (
-        <Pressable
-          onPress={() => cancelTask(task.id)}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={`Stop ${task.title}`}
-          style={[styles.stop, { borderColor: theme.danger }]}
-        >
-          <Text style={{ color: theme.danger, fontSize: 13, fontWeight: '600' }}>Stop</Text>
-        </Pressable>
+      {task.cancellable ? (
+        <PillButton title="Stop" variant="secondary" size="sm" onPress={() => cancelTask(task.id)} accessibilityHint={`Stops ${task.title}`} />
+      ) : (
+        <Icon name="chevron-right" size={16} color={theme.inkFaint} />
+      )}
+    </Pressable>
+  );
+}
+
+/** A finished task as a tool step: kind icon, title, details and a status word. */
+function FinishedRow({ task }: { task: Task }) {
+  const theme = useTheme();
+  const failed = task.status === 'failed';
+  const detail = `${formatElapsed((task.endedAt ?? task.startedAt) - task.startedAt)} · ${new Date(task.startedAt).toLocaleString()}${
+    task.exitCode != null ? ` · exit ${task.exitCode}` : ''
+  }`;
+  return (
+    <Pressable
+      onPress={() => router.push(`/tasks/${task.id}`)}
+      accessibilityRole="button"
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.step,
+        { backgroundColor: pressed || hovered ? theme.fill : theme.surface, borderColor: theme.border },
+      ]}
+    >
+      <Icon name={failed ? 'alert-circle' : KIND_ICON[task.kind]} size={16} color={failed ? theme.danger : theme.inkMuted} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={1} style={[TYPE.subhead, { color: theme.ink, fontFamily: undefined, fontWeight: '400' }]}>
+          {task.title}
+        </Text>
+        <Text numberOfLines={1} style={{ color: theme.inkMuted, fontSize: 12, lineHeight: 16 }}>
+          {detail}
+        </Text>
+      </View>
+      {task.status === 'done' ? (
+        <StatusBadge tone="success">Done</StatusBadge>
+      ) : failed ? (
+        <StatusBadge tone="danger">Failed</StatusBadge>
+      ) : (
+        <StatusBadge tone="neutral">Stopped</StatusBadge>
       )}
     </Pressable>
   );
@@ -63,55 +102,65 @@ function TaskRow({ task, now }: { task: Task; now: number }) {
 export default function TasksScreen() {
   const theme = useTheme();
   const { settings } = useStore();
+  const { width } = useWindowDimensions();
   const tasks = useTasks();
   const running = tasks.filter((t) => t.status === 'running');
   const history = tasks.filter((t) => t.status !== 'running');
   const now = useTicker(running.length > 0);
-  const data: (Task | { header: string; action?: () => void })[] = [
-    ...(running.length ? [{ header: `Running (${running.length})` }, ...running] : []),
-    { header: 'History', action: history.length ? clearTaskHistory : undefined },
-    ...history,
-  ];
+  const [tab, setTab] = useState<'running' | 'recent'>(() => (running.length ? 'running' : 'recent'));
+  const laptop = laptopConnected(settings);
+  const hint = `Replies, tool calls, laptop commands and sub-agents show up here as they run.${
+    laptop ? '' : ' Connect your laptop (Settings → Connections) to use the terminal.'
+  }`;
+  const data = tab === 'running' ? running : history;
+  const gutter = width >= WIDE_BREAKPOINT ? 24 : 16;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <Stack.Screen
         options={{
-          headerRight: () =>
-            laptopConnected(settings) ? (
-              <Pressable onPress={() => router.push('/terminal')} hitSlop={8} style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                <Icon name="terminal" size={18} color={theme.primary} />
-                <Text style={{ color: theme.primary, fontSize: 15, fontWeight: '600' }}>Terminal</Text>
-              </Pressable>
-            ) : null,
+          headerRight: () => (laptop ? <IconButton name="terminal" label="Terminal" onPress={() => router.push('/terminal')} /> : null),
         }}
       />
       <FlatList
         data={data}
         extraData={now}
-        keyExtractor={(item, i) => ('id' in item ? item.id : `h${i}`)}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
-        renderItem={({ item }) =>
-          'id' in item ? (
-            <TaskRow task={item} now={now} />
-          ) : (
-            <View style={styles.header}>
-              <Text style={{ color: theme.muted, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', flex: 1 }}>{item.header}</Text>
-              {item.action && (
-                <Pressable onPress={item.action} hitSlop={8}>
-                  <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '600' }}>Clear</Text>
-                </Pressable>
-              )}
-            </View>
-          )
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={{ paddingHorizontal: gutter, paddingBottom: 32, gap: 8, maxWidth: SIZE.contentMax + gutter * 2, width: '100%', alignSelf: 'center' }}
+        ListHeaderComponent={
+          <View style={{ paddingTop: 8, paddingBottom: 8, gap: 4 }}>
+            <SegmentedControl
+              label="Tasks"
+              value={tab}
+              onChange={setTab}
+              options={[
+                { value: 'running', label: running.length ? `Running · ${running.length}` : 'Running' },
+                { value: 'recent', label: 'Recent' },
+              ]}
+              style={{ borderRadius: RADIUS.pill }}
+            />
+            {tab === 'recent' && history.length > 0 && (
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+                <TextAction title="Clear" onPress={clearTaskHistory} />
+              </View>
+            )}
+          </View>
         }
-        ListFooterComponent={
-          history.length === 0 ? (
-            <Text style={{ color: theme.muted, fontSize: 14, marginTop: 8 }}>
-              Replies, tool calls, laptop commands and sub-agents show up here as they run.
-              {laptopConnected(settings) ? '' : ' Connect your laptop (Settings → Connections) to use the terminal.'}
-            </Text>
-          ) : null
+        renderItem={({ item }) => (item.status === 'running' ? <RunningCard task={item} now={now} /> : <FinishedRow task={item} />)}
+        ListEmptyComponent={
+          tab === 'running' ? (
+            <EmptyState
+              icon="activity"
+              title="Nothing running"
+              action={history.length ? <PillButton title="Show recent" variant="secondary" onPress={() => setTab('recent')} /> : undefined}
+            >
+              {hint}
+            </EmptyState>
+          ) : (
+            <EmptyState icon="clock" title="No tasks yet">
+              {hint}
+            </EmptyState>
+          )
         }
       />
     </View>
@@ -119,8 +168,6 @@ export default function TasksScreen() {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, minHeight: 56 },
-  icon: { width: 24, alignItems: 'center' },
-  stop: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, minHeight: 30, justifyContent: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', marginTop: 20, marginBottom: 4 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, minHeight: 64, borderRadius: RADIUS.md, borderWidth: 1 },
+  step: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 6, minHeight: 56, borderRadius: RADIUS.md, borderWidth: 1 },
 });

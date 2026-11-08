@@ -3,14 +3,45 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { TextPrompt } from '../../components/TextPrompt';
-import { Icon, PillButton } from '../../components/ui';
+import { Banner, EmptyState, Icon, IconButton, PillButton, SearchField, StatusBadge } from '../../components/ui';
 import { useStore } from '../../lib/store';
-import { useTheme } from '../../lib/theme';
+import { FONT, RADIUS, TYPE, useTheme } from '../../lib/theme';
+import type { Theme } from '../../lib/theme';
 import { describeWorkspace, wsDelete, wsList, wsMkdir, wsRename, wsSearch, wsWrite } from '../../lib/workspace/backends';
 import type { Entry } from '../../lib/workspace/core';
 import { branchHead, joinPath } from '../../lib/workspace/core';
 import { patchWorkspace, useWorkspace } from '../../lib/workspace/store';
-import { Text, TextInput } from '../../components/Text';
+import { Text } from '../../components/Text';
+
+function formatSize(n?: number): string {
+  if (n === undefined) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Rows of one list drawn as a single card: the first and last rows carry the rounded ends. */
+function groupStyle(theme: Theme, index: number, count: number) {
+  const first = index === 0;
+  const last = index === count - 1;
+  return {
+    borderColor: theme.border,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderTopWidth: first ? 1 : 0,
+    borderBottomWidth: last ? 1 : 0,
+    borderTopLeftRadius: first ? RADIUS.md : 0,
+    borderTopRightRadius: first ? RADIUS.md : 0,
+    borderBottomLeftRadius: last ? RADIUS.md : 0,
+    borderBottomRightRadius: last ? RADIUS.md : 0,
+  };
+}
+
+const STATUS = {
+  new: { tone: 'success', word: 'Added' },
+  modified: { tone: 'warning', word: 'Modified' },
+  deleted: { tone: 'danger', word: 'Deleted' },
+} as const;
 
 type PromptKind = { kind: 'file' | 'folder' } | { kind: 'rename'; entry: Entry } | null;
 
@@ -45,7 +76,12 @@ export default function WorkspaceScreen() {
     Promise.resolve().then(load);
   }, [load]);
 
-  if (!ws) return <Text style={{ padding: 20, color: theme.muted }}>This workspace was removed.</Text>;
+  if (!ws)
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg, justifyContent: 'center' }}>
+        <EmptyState icon="folder" title="This workspace was removed." />
+      </View>
+    );
 
   const run = async (fn: () => Promise<unknown>, confirm?: string) => {
     const go = async () => {
@@ -93,29 +129,36 @@ export default function WorkspaceScreen() {
     router.push(`/chat/${conv.id}`);
   };
 
+  const separator = () => (
+    <View style={{ backgroundColor: theme.surface, borderLeftWidth: 1, borderRightWidth: 1, borderColor: theme.border }}>
+      <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: theme.border, marginLeft: 46 }} />
+    </View>
+  );
+  const rowStyle = (index: number, count: number) => ({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+    styles.item,
+    groupStyle(theme, index, count),
+    { backgroundColor: pressed || hovered ? theme.fill : theme.surface },
+  ];
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <Stack.Screen
         options={{
           title: ws.name,
           headerRight: () => (
-            <View style={{ flexDirection: 'row', gap: 18 }}>
-              <Pressable onPress={pull} hitSlop={8} accessibilityLabel="Refresh">
-                <Icon name="refresh-cw" size={19} color={theme.text} />
-              </Pressable>
-              <Pressable onPress={() => setPrompt({ kind: 'file' })} hitSlop={8} accessibilityLabel="New file">
-                <Icon name="file-plus" size={20} color={theme.text} />
-              </Pressable>
-              <Pressable onPress={() => setPrompt({ kind: 'folder' })} hitSlop={8} accessibilityLabel="New folder">
-                <Icon name="folder-plus" size={20} color={theme.text} />
-              </Pressable>
+            <View style={{ flexDirection: 'row' }}>
+              <IconButton name="refresh-cw" label="Refresh" size={19} onPress={pull} />
+              <IconButton name="file-plus" label="New file" onPress={() => setPrompt({ kind: 'file' })} />
+              <IconButton name="folder-plus" label="New folder" onPress={() => setPrompt({ kind: 'folder' })} />
             </View>
           ),
         }}
       />
-      <View style={{ paddingHorizontal: 16, paddingTop: 10 }}>
-        <Text style={{ color: theme.muted, fontSize: 12 }}>{describeWorkspace(ws)}</Text>
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 8, gap: 10 }}>
+        <Text style={{ color: theme.inkMuted, fontFamily: FONT.mono, fontSize: 12, lineHeight: 16 }} numberOfLines={1} ellipsizeMode="middle">
+          {describeWorkspace(ws)}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
           <PillButton title="Ask the assistant" icon="message-circle" onPress={ask} style={{ flex: 1 }} />
           {ws.kind === 'github' && (
             <PillButton
@@ -127,38 +170,35 @@ export default function WorkspaceScreen() {
           )}
         </View>
         {ws.lastCommit && (
-          <Text style={{ color: theme.faint, fontSize: 12, marginTop: 6 }}>
-            Last commit {ws.lastCommit.sha.slice(0, 7)} → {ws.lastCommit.branch}
+          <Text style={{ color: theme.inkFaint, fontSize: 12, lineHeight: 16 }}>
+            Last commit <Text style={{ fontFamily: FONT.mono }}>{ws.lastCommit.sha.slice(0, 7)}</Text> → {ws.lastCommit.branch}
           </Text>
         )}
-        <View style={[styles.search, { backgroundColor: theme.surface2 }]}>
-          <Icon name="search" size={15} />
-          <TextInput
-            value={query}
-            onChangeText={(t) => {
-              setQuery(t);
-              if (!t) setResults(null);
-            }}
-            onSubmitEditing={search}
-            returnKeyType="search"
-            placeholder="Search files and text"
-            placeholderTextColor={theme.faint}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={{ flex: 1, color: theme.text, paddingVertical: 9, fontSize: 15 }}
-          />
-        </View>
+        <SearchField
+          value={query}
+          onChangeText={(t) => {
+            setQuery(t);
+            if (!t) setResults(null);
+          }}
+          onSubmitEditing={search}
+          placeholder="Search files and text"
+        />
         {!results && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.crumbs}>
-            <Pressable onPress={() => setDir('')}>
-              <Text style={{ color: theme.primary, fontWeight: '600' }}>{ws.name}</Text>
+            <Pressable onPress={() => setDir('')} accessibilityRole="link" accessibilityLabel={`${ws.name}, top folder`} style={styles.crumb}>
+              <Text style={[styles.crumbText, { color: crumbs.length ? theme.accent : theme.ink, fontFamily: FONT.monoMedium }]}>{ws.name}</Text>
             </Pressable>
-            {crumbs.map((c, i) => (
-              <Pressable key={i} onPress={() => setDir(crumbs.slice(0, i + 1).join('/'))} style={{ flexDirection: 'row' }}>
-                <Text style={{ color: theme.faint }}> / </Text>
-                <Text style={{ color: i === crumbs.length - 1 ? theme.text : theme.primary }}>{c}</Text>
-              </Pressable>
-            ))}
+            {crumbs.map((c, i) => {
+              const current = i === crumbs.length - 1;
+              return (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={[styles.crumbText, { color: theme.inkFaint, fontFamily: FONT.mono }]}>/</Text>
+                  <Pressable onPress={() => setDir(crumbs.slice(0, i + 1).join('/'))} accessibilityRole="link" disabled={current} style={styles.crumb}>
+                    <Text style={[styles.crumbText, { color: current ? theme.ink : theme.accent, fontFamily: FONT.mono }]}>{c}</Text>
+                  </Pressable>
+                </View>
+              );
+            })}
           </ScrollView>
         )}
       </View>
@@ -167,12 +207,16 @@ export default function WorkspaceScreen() {
         <FlatList
           data={results}
           keyExtractor={(r, i) => `${i}:${r}`}
-          ListEmptyComponent={<Text style={{ color: theme.muted, padding: 16 }}>No matches.</Text>}
-          renderItem={({ item }) => {
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          ItemSeparatorComponent={separator}
+          ListEmptyComponent={<EmptyState icon="search" title="No matches." />}
+          renderItem={({ item, index }) => {
             const path = item.replace(/(:\d+:.*| \(.*\))$/, '').replace(/\/$/, '');
             return (
-              <Pressable onPress={() => (item.endsWith('/') ? (setDir(path), setResults(null)) : openFile(path))} style={styles.item}>
-                <Text style={{ color: theme.text, fontFamily: 'monospace', fontSize: 13 }} numberOfLines={2}>
+              <Pressable onPress={() => (item.endsWith('/') ? (setDir(path), setResults(null)) : openFile(path))} style={rowStyle(index, results.length)}>
+                <Icon name={item.endsWith('/') ? 'folder' : 'file-text'} size={16} />
+                <Text style={[TYPE.code, { color: theme.ink, flex: 1 }]} numberOfLines={2}>
                   {item}
                 </Text>
               </Pressable>
@@ -180,14 +224,23 @@ export default function WorkspaceScreen() {
           }}
         />
       ) : entries === null ? (
-        <ActivityIndicator style={{ marginTop: 32 }} />
+        <ActivityIndicator color={theme.inkMuted} style={{ marginTop: 32 }} />
       ) : (
         <FlatList
           data={entries}
           keyExtractor={(e) => e.path}
-          contentContainerStyle={{ paddingBottom: 48 }}
-          ListEmptyComponent={<Text style={{ color: error ? theme.danger : theme.muted, padding: 16 }}>{error || 'Empty folder.'}</Text>}
-          renderItem={({ item: e }) => (
+          contentContainerStyle={styles.list}
+          ItemSeparatorComponent={separator}
+          ListEmptyComponent={
+            error ? (
+              <Banner tone="danger" title="Couldn’t open this folder">
+                {error}
+              </Banner>
+            ) : (
+              <EmptyState icon="folder" title="Empty folder." />
+            )
+          }
+          renderItem={({ item: e, index }) => (
             <Pressable
               onPress={() => (e.isDir ? setDir(e.path) : e.status !== 'deleted' && openFile(e.path))}
               onLongPress={() =>
@@ -201,25 +254,30 @@ export default function WorkspaceScreen() {
                   { text: 'Cancel', style: 'cancel' },
                 ])
               }
-              style={({ pressed }) => [styles.item, pressed && { backgroundColor: theme.surface2 }]}
+              accessibilityRole="button"
+              accessibilityLabel={e.status ? `${e.name}, ${STATUS[e.status].word}` : e.name}
+              accessibilityHint="Long-press to rename, move or delete."
+              style={rowStyle(index, entries.length)}
             >
-              <Icon name={e.isDir ? 'folder' : 'file-text'} size={17} color={e.isDir ? theme.accent : theme.muted} />
+              <Icon name={e.isDir ? 'folder' : 'file-text'} size={20} />
               <Text
-                style={{
-                  flex: 1,
-                  color: e.status === 'deleted' ? theme.faint : theme.text,
-                  textDecorationLine: e.status === 'deleted' ? 'line-through' : 'none',
-                  fontSize: 15,
-                }}
+                style={[
+                  TYPE.callout,
+                  {
+                    flex: 1,
+                    color: e.status === 'deleted' ? theme.inkFaint : theme.ink,
+                    textDecorationLine: e.status === 'deleted' ? 'line-through' : 'none',
+                  },
+                ]}
                 numberOfLines={1}
               >
                 {e.name}
               </Text>
-              {e.status && (
-                <Text style={{ color: e.status === 'deleted' ? theme.danger : theme.primary, fontSize: 12, fontWeight: '700' }}>
-                  {e.status === 'new' ? 'A' : e.status === 'deleted' ? 'D' : 'M'}
-                </Text>
+              {e.status && <StatusBadge tone={STATUS[e.status].tone}>{STATUS[e.status].word}</StatusBadge>}
+              {!e.isDir && e.size !== undefined && (
+                <Text style={{ color: theme.inkFaint, fontFamily: FONT.mono, fontSize: 12, lineHeight: 16 }}>{formatSize(e.size)}</Text>
               )}
+              {e.isDir && <Icon name="chevron-right" size={16} color={theme.inkFaint} />}
             </Pressable>
           )}
         />
@@ -249,7 +307,9 @@ export default function WorkspaceScreen() {
 }
 
 const styles = StyleSheet.create({
-  search: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 10, paddingHorizontal: 12, marginTop: 10 },
-  crumbs: { paddingVertical: 10, alignItems: 'center' },
-  item: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  crumbs: { alignItems: 'center', minHeight: 44 },
+  crumb: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
+  crumbText: { fontSize: 13, lineHeight: 18 },
+  list: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 48 },
+  item: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10, minHeight: 52, overflow: 'hidden' },
 });

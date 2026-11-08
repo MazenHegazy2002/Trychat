@@ -1,11 +1,12 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, View } from 'react-native';
+import { ActivityIndicator, Alert, View } from 'react-native';
 
-import { CodeView, codeFont } from '../../components/CodeView';
+import { CodeView } from '../../components/CodeView';
 import { KeyboardPadded } from '../../components/KeyboardPadded';
+import { Banner, IconButton, StatusBadge } from '../../components/ui';
 import { useStore } from '../../lib/store';
-import { useTheme } from '../../lib/theme';
+import { FONT, TYPE, useTheme } from '../../lib/theme';
 import { titleOf, wsRead, wsWrite } from '../../lib/workspace/backends';
 import { useWorkspace } from '../../lib/workspace/store';
 import { Text, TextInput } from '../../components/Text';
@@ -52,6 +53,7 @@ export default function WorkspaceFileScreen() {
     else Alert.alert(`Save ${titleOf(path)}?`, `This overwrites the file in the ${ws.kind} folder.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Save', onPress: go }]);
   };
 
+  const saveLabel = ws.kind === 'github' ? 'Stage' : 'Save';
   return (
     <KeyboardPadded style={{ backgroundColor: theme.bg }}>
       <Stack.Screen
@@ -59,29 +61,35 @@ export default function WorkspaceFileScreen() {
           title: titleOf(path),
           headerRight: () =>
             text === null ? null : (
-              <View style={{ flexDirection: 'row', gap: 18 }}>
-                {editing && (
-                  <Pressable onPress={() => (setDraft(text), setEditing(false))} hitSlop={8}>
-                    <Text style={{ color: theme.muted, fontSize: 15 }}>Cancel</Text>
-                  </Pressable>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {editing && <IconButton name="x" label="Cancel" onPress={() => (setDraft(text), setEditing(false))} />}
+                {saving ? (
+                  <View style={{ width: 44, alignItems: 'center' }} accessibilityLabel="Saving…">
+                    <ActivityIndicator color={theme.inkMuted} />
+                  </View>
+                ) : editing ? (
+                  <IconButton name="check" label={saveLabel} onPress={save} disabled={!dirty} color={dirty ? theme.accent : undefined} />
+                ) : (
+                  <IconButton name="edit-2" label="Edit" onPress={() => setEditing(true)} />
                 )}
-                <Pressable onPress={editing ? save : () => setEditing(true)} disabled={saving || (editing && !dirty)} hitSlop={8}>
-                  <Text style={{ color: editing && !dirty ? theme.faint : theme.primary, fontSize: 15, fontWeight: '600' }}>
-                    {saving ? 'Saving…' : editing ? (ws.kind === 'github' ? 'Stage' : 'Save') : 'Edit'}
-                  </Text>
-                </Pressable>
               </View>
             ),
         }}
       />
-      <Text style={{ color: theme.faint, fontSize: 12, paddingHorizontal: 12, paddingVertical: 6 }} numberOfLines={1}>
-        {path}
-        {ws.changes[path] ? ' · staged' : ''}
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
+        <Text style={{ flex: 1, color: theme.inkFaint, fontFamily: FONT.mono, fontSize: 12, lineHeight: 16 }} numberOfLines={1} ellipsizeMode="head">
+          {path}
+        </Text>
+        {!!ws.changes[path] && <StatusBadge tone="warning">Staged</StatusBadge>}
+      </View>
       {error ? (
-        <Text style={{ color: theme.danger, padding: 16 }}>{error}</Text>
+        <View style={{ paddingHorizontal: 16 }}>
+          <Banner tone="danger" title="Couldn’t open this file">
+            {error}
+          </Banner>
+        </View>
       ) : text === null ? (
-        <ActivityIndicator style={{ marginTop: 32 }} />
+        <ActivityIndicator color={theme.inkMuted} style={{ marginTop: 32 }} />
       ) : editing ? (
         <TextInput
           value={draft}
@@ -91,10 +99,13 @@ export default function WorkspaceFileScreen() {
           autoCorrect={false}
           spellCheck={false}
           textAlignVertical="top"
-          style={{ flex: 1, backgroundColor: '#1F1E1D', color: '#E8E6DC', fontFamily: codeFont, fontSize: 13, lineHeight: 19, padding: 12 }}
+          accessibilityLabel={`Edit ${titleOf(path)}`}
+          style={[TYPE.code, { flex: 1, backgroundColor: theme.codeBg, color: theme.codeInk, paddingHorizontal: 16, paddingVertical: 12 }]}
         />
       ) : (
-        <CodeView text={text} path={path} />
+        <View style={{ flex: 1, backgroundColor: theme.codeBg }}>
+          <CodeView text={text} path={path} />
+        </View>
       )}
     </KeyboardPadded>
   );

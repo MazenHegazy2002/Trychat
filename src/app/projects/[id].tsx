@@ -1,14 +1,18 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { TextPrompt } from '../../components/TextPrompt';
-import { Card, Divider, Icon, PillButton, SectionLabel } from '../../components/ui';
+import { FileTile, fileTypeLabel } from '../../components/FileCards';
+import { Card, Divider, EmptyState, IconButton, IconTile, PillButton, TextAction } from '../../components/ui';
 import { deleteAttachmentFiles, formatSize, pickFiles } from '../../lib/attachments';
 import { useStore } from '../../lib/store';
-import { useTheme } from '../../lib/theme';
+import { RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, useTheme } from '../../lib/theme';
+import type { Attachment, ChatMessage, Conversation } from '../../lib/types';
 import { Text } from '../../components/Text';
+
+const shownText = (m: ChatMessage) => m.displayText ?? m.content;
 
 type Field = 'name' | 'description' | 'instructions';
 
@@ -23,6 +27,7 @@ function timeAgo(ts: number): string {
 export default function ProjectScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
+  const wide = useWindowDimensions().width >= WIDE_BREAKPOINT;
   const { projects, conversations, saveProject, deleteProject, createConversation } = useStore();
   const project = projects.find((p) => p.id === id);
   const [editing, setEditing] = useState<Field | null>(null);
@@ -31,7 +36,9 @@ export default function ProjectScreen() {
   if (!project) {
     return (
       <View style={[styles.center, { backgroundColor: theme.bg }]}>
-        <Text style={{ color: theme.muted }}>This project no longer exists.</Text>
+        <EmptyState icon="folder" title="Project not found">
+          This project no longer exists.
+        </EmptyState>
       </View>
     );
   }
@@ -91,101 +98,65 @@ export default function ProjectScreen() {
     instructions: { title: 'Instructions', placeholder: 'How TryChat should work in this project…', multiline: true },
   };
 
+  const page = [styles.page, wide && styles.pageWide];
   return (
-    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
+    <KeyboardAwareScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={page} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
       <Stack.Screen
         options={{
           title: '',
-          headerRight: () => (
-            <Pressable onPress={confirmDelete} style={styles.headerBtn} accessibilityLabel="Delete project">
-              <Icon name="trash-2" size={20} color={theme.muted} />
-            </Pressable>
-          ),
+          headerRight: () => <IconButton name="trash-2" label="Delete project" onPress={confirmDelete} />,
         }}
       />
 
-      <View style={[styles.tile, { backgroundColor: theme.oat }]}>
-        <Icon name="folder" size={20} color={theme.primary} />
-      </View>
-      <Pressable onPress={() => setEditing('name')} accessibilityRole="button" accessibilityHint="Rename project">
-        <Text style={{ color: theme.text, fontFamily: theme.serif, fontSize: 28, marginTop: 12 }}>{project.name}</Text>
+      <IconTile name="folder" size={48} />
+      <Pressable onPress={() => setEditing('name')} accessibilityRole="button" accessibilityHint="Rename project" style={{ marginTop: 14 }}>
+        <Text style={[TYPE.title, { color: theme.ink }]}>{project.name}</Text>
       </Pressable>
-      <Pressable onPress={() => setEditing('description')} accessibilityRole="button" accessibilityHint="Edit description">
-        <Text style={{ color: project.description ? theme.muted : theme.faint, fontSize: 14, marginTop: 4 }}>
-          {project.description || 'Add a description'}
-        </Text>
+      <Pressable onPress={() => setEditing('description')} accessibilityRole="button" accessibilityHint="Edit description" style={{ marginTop: 4 }}>
+        <Text style={[TYPE.callout, { color: project.description ? theme.inkMuted : theme.inkFaint }]}>{project.description || 'Add a description'}</Text>
       </Pressable>
 
-      <PillButton title="New chat in this project" icon="plus" onPress={newChat} style={{ marginTop: 18 }} />
+      <PillButton title="New chat in this project" icon="plus" onPress={newChat} style={{ marginTop: 20 }} />
 
-      <Card style={{ padding: 16, marginTop: 20 }}>
-        <View style={styles.cardHead}>
-          <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>Instructions</Text>
-          <Pressable onPress={() => setEditing('instructions')} hitSlop={10} style={styles.link}>
-            <Text style={{ color: theme.primary, fontWeight: '600' }}>{project.instructions ? 'Edit' : 'Add'}</Text>
-          </Pressable>
-        </View>
-        <Text style={{ color: project.instructions ? theme.text : theme.faint, fontSize: 14, lineHeight: 20 }} numberOfLines={4}>
+      <SectionHead label={`Chats${chats.length ? ` · ${chats.length}` : ''}`} />
+      <Card>
+        {chats.length ? (
+          chats.map((c, i) => (
+            <View key={c.id}>
+              {i > 0 && <Divider inset={16} />}
+              <ChatRow chat={c} />
+            </View>
+          ))
+        ) : (
+          <Text style={[TYPE.callout, { color: theme.inkMuted, padding: 16 }]}>
+            No chats yet. Start one above, or long-press a chat in your list to move it here.
+          </Text>
+        )}
+      </Card>
+
+      <SectionHead label="Instructions" action={project.instructions ? 'Edit' : 'Add'} onAction={() => setEditing('instructions')} />
+      <Pressable
+        onPress={() => setEditing('instructions')}
+        accessibilityRole="button"
+        accessibilityHint="Edit instructions"
+        style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+          styles.instructions,
+          { backgroundColor: pressed || hovered ? theme.fill : theme.surface, borderColor: theme.border },
+        ]}
+      >
+        <Text style={[TYPE.callout, { color: project.instructions ? theme.ink : theme.inkFaint }]} numberOfLines={6}>
           {project.instructions || 'Tell TryChat how to behave in every chat in this project.'}
         </Text>
-      </Card>
+      </Pressable>
 
-      <Card style={{ marginTop: 12 }}>
-        <View style={[styles.cardHead, { paddingHorizontal: 16, paddingTop: 14 }]}>
-          <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>Files · {project.files.length}</Text>
-          {adding ? (
-            <ActivityIndicator color={theme.primary} style={styles.link} />
-          ) : (
-            <Pressable onPress={addFiles} hitSlop={10} style={styles.link}>
-              <Text style={{ color: theme.primary, fontWeight: '600' }}>Add</Text>
-            </Pressable>
-          )}
-        </View>
-        {project.files.map((f, i) => (
-          <View key={f.id}>
-            {i > 0 && <Divider />}
-            <View style={styles.fileRow}>
-              <View style={[styles.smallTile, { backgroundColor: theme.surface2 }]}>
-                <Icon name={f.text !== undefined ? 'file-text' : 'file'} size={15} color={theme.text} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.text, fontSize: 14 }} numberOfLines={1}>
-                  {f.name}
-                </Text>
-                <Text style={{ color: theme.faint, fontSize: 12 }}>
-                  {formatSize(f.size)}
-                  {f.text === undefined ? ' · not readable as text' : ''}
-                </Text>
-              </View>
-              <Pressable onPress={() => removeFile(f.id)} style={styles.headerBtn} accessibilityLabel={`Remove ${f.name}`}>
-                <Icon name="x" size={16} />
-              </Pressable>
-            </View>
-          </View>
+      <SectionHead label={`Files${project.files.length ? ` · ${project.files.length}` : ''}`} />
+      <View style={{ gap: 8 }}>
+        {project.files.map((f) => (
+          <ProjectFile key={f.id} file={f} onRemove={() => removeFile(f.id)} />
         ))}
-        <Text style={{ color: theme.muted, fontSize: 12, paddingHorizontal: 16, paddingBottom: 14, paddingTop: project.files.length ? 4 : 0 }}>
-          Every chat in this project can read these.
-        </Text>
-      </Card>
-
-      <SectionLabel>Chats</SectionLabel>
-      {chats.length ? (
-        <Card>
-          {chats.map((c, i) => (
-            <View key={c.id}>
-              {i > 0 && <Divider />}
-              <Pressable onPress={() => router.push(`/chat/${c.id}`)} style={styles.chatRow} accessibilityRole="button">
-                <Text style={{ color: theme.text, fontSize: 15, flex: 1 }} numberOfLines={1}>
-                  {c.title}
-                </Text>
-                <Text style={{ color: theme.faint, fontSize: 12 }}>{timeAgo(c.updatedAt)}</Text>
-              </Pressable>
-            </View>
-          ))}
-        </Card>
-      ) : (
-        <Text style={{ color: theme.muted }}>No chats yet. Start one above, or long-press a chat in your list to move it here.</Text>
-      )}
+      </View>
+      <PillButton title="Add files" icon="paperclip" variant="secondary" onPress={addFiles} loading={adding} style={{ marginTop: project.files.length ? 12 : 0 }} />
+      <Text style={[TYPE.caption, { color: theme.inkFaint, marginTop: 8, marginHorizontal: 4 }]}>Every chat in this project can read these.</Text>
 
       <TextPrompt
         visible={!!editing}
@@ -200,13 +171,69 @@ export default function ProjectScreen() {
   );
 }
 
+/** Capitals section label with an optional text action on the right. */
+function SectionHead({ label, action, onAction }: { label: string; action?: string; onAction?: () => void }) {
+  const theme = useTheme();
+  return (
+    <View style={styles.sectionHead}>
+      <Text style={[TYPE.overline, { color: theme.inkFaint, flex: 1 }]} accessibilityRole="header">
+        {label}
+      </Text>
+      {!!action && !!onAction && <TextAction title={action} onPress={onAction} />}
+    </View>
+  );
+}
+
+/** Title and time, then the last message on one line (like the chat list). */
+function ChatRow({ chat }: { chat: Conversation }) {
+  const theme = useTheme();
+  const last = [...chat.messages].reverse().find((m) => !m.toolResult && shownText(m));
+  return (
+    <Pressable
+      onPress={() => router.push(`/chat/${chat.id}`)}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.chatRow, (pressed || hovered) && { backgroundColor: theme.fill }]}
+      accessibilityRole="button"
+      accessibilityLabel={chat.title}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 12 }}>
+        <Text style={[TYPE.callout, { flex: 1, color: theme.ink, fontWeight: '500' }]} numberOfLines={1}>
+          {chat.title}
+        </Text>
+        <Text style={[TYPE.caption, { color: theme.inkFaint }]}>{timeAgo(chat.updatedAt)}</Text>
+      </View>
+      <Text style={[TYPE.caption, { color: theme.inkMuted, marginTop: 2 }]} numberOfLines={1}>
+        {last ? shownText(last).replace(/\s+/g, ' ') : 'Empty chat'}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** A reference file as a FileCard-style tile, with a remove button. */
+function ProjectFile({ file: f, onRemove }: { file: Attachment; onRemove: () => void }) {
+  const theme = useTheme();
+  return (
+    <View style={[styles.file, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <FileTile file={f} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[TYPE.callout, { color: theme.ink, fontWeight: '500' }]} numberOfLines={1}>
+          {f.name}
+        </Text>
+        <Text style={[TYPE.codeLabel, { color: theme.inkFaint, marginTop: 2 }]} numberOfLines={1}>
+          {fileTypeLabel(f)} · {formatSize(f.size)}
+          {f.text === undefined ? ' · not readable as text' : ''}
+        </Text>
+      </View>
+      <IconButton name="x" label={`Remove ${f.name}`} onPress={onRemove} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  headerBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  tile: { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  smallTile: { width: 32, height: 32, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
-  link: { minHeight: 36, minWidth: 44, alignItems: 'flex-end', justifyContent: 'center' },
-  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 16, paddingRight: 4, minHeight: 56 },
-  chatRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, minHeight: 52 },
+  page: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 48 },
+  pageWide: { width: '100%', maxWidth: SIZE.contentMax, alignSelf: 'center', paddingHorizontal: 24, paddingTop: 28 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', minHeight: 44, marginTop: 12, marginBottom: 0, marginHorizontal: 4 },
+  chatRow: { paddingHorizontal: 16, paddingVertical: 12, minHeight: 56 },
+  instructions: { borderWidth: 1, borderRadius: RADIUS.md, padding: 16 },
+  file: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 12, paddingRight: 4, paddingVertical: 8, minHeight: 60, borderRadius: RADIUS.md, borderWidth: 1 },
 });

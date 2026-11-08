@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { listModels } from '../lib/api';
 import { useStore } from '../lib/store';
-import { useTheme } from '../lib/theme';
+import { FONT, RADIUS, TYPE, WIDE_BREAKPOINT, shadow, useTheme } from '../lib/theme';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
-import { Text, TextInput } from './Text';
+import { Text } from './Text';
+import { Icon, SearchField, TextAction } from './ui';
 
 interface Props {
   visible: boolean;
@@ -18,6 +19,7 @@ interface Props {
 export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const wide = useWindowDimensions().width >= WIDE_BREAKPOINT;
   const { settings } = useStore();
   const [models, setModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -38,20 +40,37 @@ export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
   const custom = query.trim() && !models.includes(query.trim()) ? query.trim() : '';
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} onShow={load} transparent statusBarTranslucent navigationBarTranslucent>
-      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={-insets.bottom} style={styles.backdrop}>
-        <View style={[styles.sheet, { backgroundColor: theme.bg, paddingBottom: insets.bottom + 12 }]}>
+    <Modal
+      visible={visible}
+      animationType={wide ? 'fade' : 'slide'}
+      onRequestClose={onClose}
+      onShow={load}
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+    >
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={-insets.bottom} style={[styles.backdrop, wide && styles.backdropWide]}>
+        <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }]} onPress={onClose} accessibilityLabel="Close" />
+        <View
+          accessibilityViewIsModal
+          style={[
+            styles.sheet,
+            { backgroundColor: theme.surfaceRaised },
+            shadow(theme, 'sheet'),
+            wide ? styles.dialog : { paddingBottom: insets.bottom + 12 },
+          ]}
+        >
+          {!wide && <View style={[styles.grabber, { backgroundColor: theme.borderStrong }]} />}
           <View style={styles.header}>
-            <Text style={[styles.title, { color: theme.text }]}>Choose a model</Text>
-            <Pressable onPress={onClose} hitSlop={10}>
-              <Text style={{ color: theme.primary, fontSize: 16, fontWeight: '600' }}>Done</Text>
-            </Pressable>
+            <Text style={[TYPE.headline, { color: theme.ink, flex: 1 }]} accessibilityRole="header">
+              Choose a model
+            </Text>
+            <TextAction title="Done" onPress={onClose} />
           </View>
-          <TextInput
+          <SearchField
             value={query}
             onChangeText={setQuery}
             placeholder="Search or type a model id"
-            placeholderTextColor={theme.muted}
             autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="done"
@@ -62,11 +81,12 @@ export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
                 onClose();
               }
             }}
-            style={[styles.search, { backgroundColor: theme.surface, color: theme.text }]}
+            style={styles.search}
+            inputStyle={{ fontFamily: FONT.mono, fontSize: 14 }}
           />
-          {loading && <ActivityIndicator style={{ margin: 16 }} color={theme.primary} />}
+          {loading && <ActivityIndicator style={{ margin: 16 }} color={theme.inkMuted} />}
           {!!error && (
-            <Text style={{ color: theme.danger, margin: 12 }}>
+            <Text style={[TYPE.caption, { color: theme.danger, marginHorizontal: 16, marginVertical: 8 }]}>
               Couldn’t load models: {error}
               {'\n'}You can still type a model id above.
             </Text>
@@ -76,20 +96,35 @@ export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
             keyExtractor={(m) => m}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
-            renderItem={({ item }) => (
-              <Pressable
-                onPress={() => {
-                  onSelect(item);
-                  onClose();
-                }}
-                style={[styles.row, { borderBottomColor: theme.border }]}
-              >
-                <Text style={{ color: theme.text, fontSize: 15, flex: 1 }} numberOfLines={1}>
-                  {item === custom ? `Use “${item}”` : item}
-                </Text>
-                {item === selected && <Text style={{ color: theme.primary, fontSize: 16 }}>✓</Text>}
-              </Pressable>
-            )}
+            contentContainerStyle={styles.list}
+            renderItem={({ item }) => {
+              const on = item === selected;
+              return (
+                <Pressable
+                  onPress={() => {
+                    onSelect(item);
+                    onClose();
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                    styles.row,
+                    { backgroundColor: on ? theme.accentSoft : pressed || hovered ? theme.fill : 'transparent' },
+                  ]}
+                >
+                  {item === custom ? (
+                    <Text style={[TYPE.callout, { color: theme.ink, flex: 1 }]} numberOfLines={1}>
+                      Use “<Text style={styles.mono}>{item}</Text>”
+                    </Text>
+                  ) : (
+                    <Text style={[styles.mono, { color: theme.ink, flex: 1 }, on && { fontFamily: FONT.monoSemibold }]} numberOfLines={1}>
+                      {item}
+                    </Text>
+                  )}
+                  {on && <Icon name="check" size={18} color={theme.accent} />}
+                </Pressable>
+              );
+            }}
           />
         </View>
       </KeyboardAvoidingView>
@@ -98,10 +133,14 @@ export function ModelPicker({ visible, selected, onSelect, onClose }: Props) {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet: { height: '80%', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingTop: 16 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 12 },
-  title: { fontSize: 18, fontWeight: '700' },
-  search: { marginHorizontal: 16, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
-  row: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  backdrop: { flex: 1, justifyContent: 'flex-end' },
+  backdropWide: { justifyContent: 'center', alignItems: 'center', padding: 24 },
+  sheet: { height: '80%', borderTopLeftRadius: RADIUS.lg, borderTopRightRadius: RADIUS.lg, paddingTop: 8 },
+  dialog: { width: '100%', maxWidth: 440, height: '70%', maxHeight: 640, borderRadius: RADIUS.lg, paddingTop: 12, paddingBottom: 12 },
+  grabber: { width: 36, height: 5, borderRadius: RADIUS.pill, alignSelf: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingLeft: 16, paddingRight: 12, minHeight: 52 },
+  search: { marginHorizontal: 16, marginBottom: 8 },
+  list: { paddingHorizontal: 8, paddingBottom: 8 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingHorizontal: 12, borderRadius: RADIUS.sm },
+  mono: { fontFamily: FONT.mono, fontSize: 14, lineHeight: 20 },
 });
