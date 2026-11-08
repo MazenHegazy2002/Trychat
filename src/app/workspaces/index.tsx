@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View, useW
 import { Card, Divider, EmptyState, Icon, ListRow, PillButton, ScreenIntro, SearchField, SectionLabel, StatusBadge, TextAction, TextField } from '../../components/ui';
 import type { IconName } from '../../components/ui';
 import { listUserRepos, normalizeRepo, repoInfo } from '../../lib/github';
+import { desktopFs } from '../../lib/desktop';
 import { useStore } from '../../lib/store';
 import { FONT, RADIUS, SIZE, TYPE, WIDE_BREAKPOINT, useTheme } from '../../lib/theme';
 import { laptopConnected } from '../../lib/tools';
@@ -46,6 +47,17 @@ function AddOption({ icon, title, detail, children }: { icon: IconName; title: s
       {children}
     </View>
   );
+}
+
+async function openComputerFolder() {
+  try {
+    const picked = await desktopFs?.pickFolder();
+    if (!picked) return;
+    const ws = addWorkspace({ name: picked.name, kind: 'computer', root: picked.path });
+    router.push(`/workspaces/${ws.id}`);
+  } catch (e) {
+    Alert.alert("Couldn't open the folder", e instanceof Error ? e.message : String(e));
+  }
 }
 
 export default function WorkspacesScreen() {
@@ -166,7 +178,14 @@ export default function WorkspacesScreen() {
 
       <SectionLabel>Open a workspace</SectionLabel>
       <Card>
-        {/* desktop-folder-slot */}
+        {desktopFs && (
+          <>
+            <AddOption icon="hard-drive" title="Folder on this computer" detail="Pick a folder; the assistant can read and edit files only inside it.">
+              <PillButton title="Open a folder" icon="folder" variant="secondary" onPress={openComputerFolder} />
+            </AddOption>
+            <Divider inset={16} />
+          </>
+        )}
         <AddOption icon="github" title="GitHub repository" detail={!picking ? 'Pick a repository and a branch.' : undefined}>
           {!picking ? (
             <PillButton title="Choose repository" icon="github" variant="secondary" onPress={() => setPicking(true)} />

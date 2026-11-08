@@ -76,7 +76,9 @@ function faceStyle(face: Face): TextStyle {
   return { fontFamily: familyFor(face), fontWeight: 'normal', fontStyle: 'normal' };
 }
 
+/** The instance type, like React Native's own Text. */
 export type Text = RNText;
+// eslint-disable-next-line @typescript-eslint/no-redeclare -- value and type share the name on purpose
 export const Text = forwardRef<ComponentRef<typeof RNText>, TextProps>(function Text({ style, ...rest }, ref) {
   const parent = useContext(FaceContext);
   const face = resolveFace(StyleSheet.flatten(style), parent);
@@ -84,7 +86,9 @@ export const Text = forwardRef<ComponentRef<typeof RNText>, TextProps>(function 
   return face ? <FaceContext.Provider value={face}>{text}</FaceContext.Provider> : text;
 });
 
+/** The instance type, like React Native's own TextInput. */
 export type TextInput = RNTextInput;
+// eslint-disable-next-line @typescript-eslint/no-redeclare -- value and type share the name on purpose
 export const TextInput = forwardRef<ComponentRef<typeof RNTextInput>, TextInputProps>(function TextInput(
   { style, placeholderTextColor, selectionColor, cursorColor, selectionHandleColor, keyboardAppearance, ...rest },
   ref,

@@ -189,7 +189,7 @@ export function Sidebar() {
           autoCorrect={false}
           style={[styles.searchInput, { color: theme.ink }]}
         />
-        {Platform.OS === 'web' && !query && <Text style={[TYPE.codeLabel, { color: theme.inkFaint }]}>Ctrl K</Text>}
+        {Platform.OS === 'web' && !query && <Text style={[TYPE.codeLabel, { color: theme.inkFaint }]} numberOfLines={1}>Ctrl+K</Text>}
       </View>
 
       <FlatList
@@ -251,7 +251,7 @@ export function Sidebar() {
 const styles = StyleSheet.create({
   sidebar: { width: SIZE.sidebar, borderRightWidth: 1, paddingHorizontal: 12 },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, borderRadius: RADIUS.sm, paddingHorizontal: 12 },
-  searchInput: { flex: 1, fontSize: 14, paddingVertical: 8, outlineStyle: 'none' } as object,
+  searchInput: { flex: 1, minWidth: 0, fontSize: 14, paddingVertical: 8, outlineStyle: 'none' } as object,
   navRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 36, paddingHorizontal: 10, borderRadius: RADIUS.sm },
   overline: { paddingHorizontal: 10, paddingTop: 18, paddingBottom: 6 },
   footer: { flexDirection: 'row', alignItems: 'center', gap: 4, borderTopWidth: 1, paddingTop: 8 },

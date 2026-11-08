@@ -13,7 +13,6 @@ const esc = (s: unknown) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     // Characters XML 1.0 forbids.
-    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
 
 const XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';

@@ -172,7 +172,7 @@ export function boardDocument(html: string): string {
 }
 
 /** A static thumbnail: the board scaled to fit, no interaction. */
-export function thumbnailDocument(board: Board, background = '#F0EEE6'): string {
+export function thumbnailDocument(board: Board, background = '#F1F1F3'): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
 html,body{margin:0;height:100%;overflow:hidden;background:${background}}
 #f{position:absolute;left:0;top:0;border:0;transform-origin:0 0;pointer-events:none;background:#fff}
@@ -188,7 +188,7 @@ export function prototypeDocument(d: Design, startBoardId?: string): string {
   const boards = d.boards.map((b) => ({ id: b.id, name: b.name, slug: slug(b.name), w: b.width, h: b.height, html: boardDocument(b.html) }));
   const start = Math.max(0, boards.findIndex((b) => b.id === startBoardId));
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(d.title)}</title><style>
-html,body{margin:0;height:100%;overflow:hidden;background:#1F1E1D;font-family:-apple-system,system-ui,sans-serif}
+html,body{margin:0;height:100%;overflow:hidden;background:#111114;font-family:-apple-system,system-ui,sans-serif}
 #stage{position:absolute;inset:0;overflow:auto;display:flex;justify-content:center}
 #f{border:0;background:#fff;transform-origin:50% 0;flex:none;box-shadow:0 10px 40px rgba(0,0,0,.4)}
 #bar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:6px;align-items:center;background:rgba(20,20,19,.86);color:#F5F4ED;border-radius:999px;padding:6px 8px;font-size:13px;backdrop-filter:blur(8px);z-index:2}
@@ -215,7 +215,7 @@ addEventListener('resize',fit);show(i);
  */
 export function canvasDocument(d: Design, view: { x: number; y: number; k: number } | null, dark: boolean, token: string): string {
   const boards = d.boards.map((b) => ({ id: b.id, name: b.name, x: b.x, y: b.y, w: b.width, h: b.height, html: boardDocument(b.html) }));
-  const bg = dark ? '#1F1E1D' : '#F0EEE6';
+  const bg = dark ? '#111114' : '#F1F1F3';
   const dot = dark ? 'rgba(250,249,245,.10)' : 'rgba(31,30,29,.13)';
   const label = dark ? '#C2C0B6' : '#5E5D59';
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
@@ -226,7 +226,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:${bg};touch-action:non
 .t{position:absolute;left:2px;bottom:100%;margin-bottom:10px;font-size:15px;font-weight:600;color:${label};white-space:nowrap;transform-origin:0 100%}
 .fr{position:absolute;inset:0;background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.08),0 12px 40px rgba(0,0,0,.12);transition:box-shadow .15s,outline-color .15s;outline:3px solid transparent;outline-offset:4px}
 .b.m .fr{border-radius:28px}
-.b.press .fr{outline-color:#D97757}
+.b.press .fr{outline-color:#FF7A45}
 iframe{border:0;width:100%;height:100%;pointer-events:none;display:block}
 .sh{position:absolute;inset:0}
 #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:${label};font-size:15px;text-align:center;padding:24px}
