@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Image, Pressable, StyleSheet, View } from 'react-native';
 
 import { fileIcon, useFileUi } from '../components/FileCards';
 import type { FileExtraAction } from '../components/FileCards';
@@ -14,6 +14,7 @@ import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { Attachment } from '../lib/types';
 import { displayUri } from '../lib/webFiles';
+import { Text, TextInput } from '../components/Text';
 
 type Filter = 'all' | 'images' | 'documents' | 'friends';
 const FILTERS: [Filter, string][] = [

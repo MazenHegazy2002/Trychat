@@ -2,12 +2,14 @@ import { base64ToBytes, decodeText, gh, GitHubError, looksBinary, utf8ToBase64 }
 import type { Settings } from '../types';
 
 /**
- * Workspaces: a GitHub repo branch, a laptop folder (bridge) or the phone folder, opened like a code editor.
+ * Workspaces: a GitHub repo branch, a laptop folder (bridge), the phone folder or a folder on this
+ * computer (desktop app), opened like a code editor.
  * GitHub workspaces keep a local changeset that is committed as ONE commit through the Git Data API.
  * This file has no React Native imports so it can be tested with plain fetch.
  */
 
-export type WorkspaceKind = 'github' | 'laptop' | 'phone';
+/** `computer`: a folder on this computer, opened in the Windows or Mac app (desktop/main.js). */
+export type WorkspaceKind = 'github' | 'laptop' | 'phone' | 'computer';
 
 export interface Change {
   op: 'write' | 'delete';
@@ -24,7 +26,7 @@ export interface Workspace {
   repo?: string;
   branch?: string;
   baseSha?: string;
-  /** laptop: subfolder of the bridge root ('' = root). */
+  /** laptop: subfolder of the bridge root ('' = root). computer: the folder's absolute path. */
   root?: string;
   /** Staged changes by path (github only). */
   changes: Record<string, Change>;

@@ -1,13 +1,14 @@
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { memo, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import type { TextStyle } from 'react-native';
 
 import { isPreviewable, isVisual, previewVerb, setPreview, toHtmlDocument } from '../lib/preview';
 import { useTheme } from '../lib/theme';
 import type { Theme } from '../lib/theme';
 import { HtmlView } from './HtmlView';
+import { Text } from './Text';
 
 type Block =
   | { type: 'code'; lang: string; code: string; closed: boolean }

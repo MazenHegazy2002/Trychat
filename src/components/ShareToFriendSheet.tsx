@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { listFriends, shareFile } from '../lib/social';
@@ -9,6 +9,7 @@ import { useTheme } from '../lib/theme';
 import type { Attachment, Friend } from '../lib/types';
 import { Icon, PillButton } from './ui';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { Text, TextInput } from './Text';
 
 /** Bottom sheet to send files to one or more friends. */
 export function ShareToFriendSheet({ visible, files, onClose }: { visible: boolean; files: Attachment[]; onClose: () => void }) {

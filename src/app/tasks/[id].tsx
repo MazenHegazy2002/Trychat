@@ -1,12 +1,13 @@
 import * as Clipboard from 'expo-clipboard';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 
 import { MONO, TERM, TerminalLog } from '../../components/TerminalLog';
 import { cancelTask } from '../../lib/tasks';
 import { useTheme } from '../../lib/theme';
 import { formatElapsed, useTasks, useTicker } from '../../lib/useTasks';
+import { Text } from '../../components/Text';
 
 export default function TaskTerminal() {
   const theme = useTheme();

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 
 import { MONO, TERM, TerminalLog } from '../components/TerminalLog';
 import { runOnLaptop } from '../lib/laptopStream';
@@ -8,6 +8,7 @@ import { useStore } from '../lib/store';
 import { appendTask, endTask, setTaskCancel, startTask } from '../lib/tasks';
 import { useTheme } from '../lib/theme';
 import { laptopConnected, laptopInfo } from '../lib/tools';
+import { Text, TextInput } from '../components/Text';
 
 /** Marks the end of a command's output, followed by the shell's working folder afterwards. */
 const CWD_MARK = '\u001eTRYCHAT_CWD:';

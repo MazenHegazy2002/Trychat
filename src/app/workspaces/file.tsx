@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, View } from 'react-native';
 
 import { CodeView, codeFont } from '../../components/CodeView';
 import { KeyboardPadded } from '../../components/KeyboardPadded';
@@ -8,6 +8,7 @@ import { useStore } from '../../lib/store';
 import { useTheme } from '../../lib/theme';
 import { titleOf, wsRead, wsWrite } from '../../lib/workspace/backends';
 import { useWorkspace } from '../../lib/workspace/store';
+import { Text, TextInput } from '../../components/Text';
 
 export default function WorkspaceFileScreen() {
   const theme = useTheme();

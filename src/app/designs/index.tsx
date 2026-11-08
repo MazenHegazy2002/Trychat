@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { BoardThumb } from '../../components/DesignViews';
 import { TextPrompt } from '../../components/TextPrompt';
@@ -10,6 +10,7 @@ import type { DesignTemplate } from '../../lib/designTemplates';
 import { createDesign, deleteDesign, renameDesign, useDesigns } from '../../lib/designs';
 import type { Design } from '../../lib/designs';
 import { useTheme } from '../../lib/theme';
+import { Text } from '../../components/Text';
 
 /** The Design studio: your designs, a blank start, and templates. */
 export default function DesignsScreen() {

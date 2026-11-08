@@ -1,6 +1,6 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Icon, PillButton, SectionLabel } from '../../components/ui';
@@ -9,6 +9,7 @@ import { uid } from '../../lib/id';
 import { useStore } from '../../lib/store';
 import { useTheme } from '../../lib/theme';
 import type { Attachment } from '../../lib/types';
+import { Text, TextInput } from '../../components/Text';
 
 export default function NewProjectScreen() {
   const theme = useTheme();

@@ -28,4 +28,17 @@ contextBridge.exposeInMainWorld('trychatDesktop', {
   htmlToPdf: (html, options) => ipcRenderer.invoke('pdf:fromHtml', html, options),
   openFile: (name, bytes) => ipcRenderer.invoke('file:open', name, bytes),
   saveFile: (name, bytes) => ipcRenderer.invoke('file:save', name, bytes),
+  // Folders on this computer that the user opened in TryChat (see main.js: only those are reachable).
+  fs: {
+    pickFolder: () => ipcRenderer.invoke('fs:pickFolder'),
+    forget: (root) => ipcRenderer.invoke('fs:forget', root),
+    list: (root, rel) => ipcRenderer.invoke('fs:list', root, rel),
+    read: (root, rel) => ipcRenderer.invoke('fs:read', root, rel),
+    write: (root, rel, content) => ipcRenderer.invoke('fs:write', root, rel, content),
+    remove: (root, rel) => ipcRenderer.invoke('fs:delete', root, rel),
+    rename: (root, from, to) => ipcRenderer.invoke('fs:rename', root, from, to),
+    mkdir: (root, rel) => ipcRenderer.invoke('fs:mkdir', root, rel),
+    search: (root, query) => ipcRenderer.invoke('fs:search', root, query),
+    reveal: (root, rel) => ipcRenderer.invoke('fs:reveal', root, rel),
+  },
 });

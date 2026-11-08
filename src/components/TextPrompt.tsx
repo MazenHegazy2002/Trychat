@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, View } from 'react-native';
 
 import { useTheme } from '../lib/theme';
+import { Text, TextInput } from './Text';
 
 interface Props {
   visible: boolean;

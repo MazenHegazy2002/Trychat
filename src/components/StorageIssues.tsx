@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { getStorageIssues, resolveStorageIssue, subscribeStorageIssues } from '../lib/storage';
 import type { StorageIssue } from '../lib/storage';
 import { useTheme } from '../lib/theme';
+import { Text } from './Text';
 
 function runAction(issue: StorageIssue) {
   const action = issue.action;

@@ -1,6 +1,6 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { TextPrompt } from '../../components/TextPrompt';
@@ -8,6 +8,7 @@ import { Card, Divider, Icon, PillButton, SectionLabel } from '../../components/
 import { deleteAttachmentFiles, formatSize, pickFiles } from '../../lib/attachments';
 import { useStore } from '../../lib/store';
 import { useTheme } from '../../lib/theme';
+import { Text } from '../../components/Text';
 
 type Field = 'name' | 'description' | 'instructions';
 

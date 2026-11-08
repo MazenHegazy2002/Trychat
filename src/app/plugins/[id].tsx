@@ -2,7 +2,7 @@ import { Stack, router, useLocalSearchParams, useNavigation } from 'expo-router'
 import { usePreventRemove } from 'expo-router/react-navigation';
 import type { ReactNode } from 'react';
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, SectionLabel } from '../../components/ui';
@@ -10,6 +10,7 @@ import { missingConfig, substituteConfig, pluginOrigin } from '../../lib/plugins
 import { useStore } from '../../lib/store';
 import { useTheme } from '../../lib/theme';
 import type { Plugin, PluginConfigField } from '../../lib/types';
+import { Text, TextInput } from '../../components/Text';
 
 type Draft = Record<string, string | boolean>;
 

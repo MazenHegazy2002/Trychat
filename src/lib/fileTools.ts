@@ -14,10 +14,12 @@ import {
   sanitizeFileName,
   typeLabel,
 } from './fileKinds';
-import { desktop } from './desktop';
 import { uid } from './id';
 import { listLibrary } from './library';
 import type { LibraryFile } from './library';
+import { desktop } from './desktop';
+import { makeDocx, makePptx, makeXlsx } from './officeFiles';
+import type { Deck, Sheet } from './officeFiles';
 import { PAGE_SIZES, printableHtml } from './printHtml';
 import type { PageSize } from './printHtml';
 import { canRunCode, runCodeWithFiles } from './runner';
@@ -26,8 +28,11 @@ import { withFiles } from './toolResult';
 import type { Args, ToolContext, ToolDef } from './tools';
 import type { Attachment, Settings } from './types';
 
-/** Tools that create files (images, PDFs, any type) and send them to the user in the chat, and read the Files library. */
-
+/**
+ * Tools that create files of every type and send them to the user in the chat: PDF, Excel (.xlsx),
+ * Word (.docx), PowerPoint (.pptx), HTML documents, images (PNG/SVG) and anything else as text or
+ * bytes (CSV, JSON, code, .ics…). Also reads the Files library.
+ */
 // ---------- Saving files on the device ----------
 
 /** Each file gets its own folder (files/<id>/<name>) so it keeps a clean name when shared. */
@@ -135,7 +140,7 @@ export async function readFileText(a: Pick<Attachment, 'uri' | 'name' | 'mimeTyp
   }
 }
 
-// ---------- PDF & image rendering ----------
+// ---------- PDF, office, HTML documents & image rendering ----------
 
 export async function makePdf(name: string, input: { html?: string; markdown?: string; pageSize?: PageSize }): Promise<Attachment> {
   const safe = sanitizeFileName(name.replace(/\.pdf$/i, '') + '.pdf', 'application/pdf');
@@ -161,6 +166,26 @@ export async function makePdf(name: string, input: { html?: string; markdown?: s
   const { id, file } = newFileTarget(safe);
   printed.move(file);
   return attachment(id, file, safe, 'application/pdf', file.size ?? 0);
+}
+
+const OFFICE_MIME = {
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+} as const;
+const withExt = (name: string, ext: string) => `${String(name || 'file').trim().replace(/\.[a-z0-9]{1,5}$/i, '') || 'file'}.${ext}`;
+
+
+/**
+ * Saves an HTML document. A full page (with <html> or a doctype) is kept as written; a fragment or
+ * Markdown gets the clean document stylesheet (readable on screen, paginates when printed).
+ */
+export function makeHtmlDocument(name: string, input: { html?: string; markdown?: string; title?: string }): Attachment {
+  const base = String(name || 'document').trim().replace(/\.[a-z0-9]{1,5}$/i, '') || 'document';
+  const html = input.html?.trim() ?? '';
+  const full = /^<!doctype html|<html[\s>]/i.test(html);
+  const page = full ? html : printableHtml({ html: html || undefined, markdown: input.markdown, title: input.title || base });
+  return saveText(`${base}.html`, page, 'text/html');
 }
 
 /** JavaScript for the hidden runner that draws an SVG onto a canvas and saves it as PNG. */
@@ -244,7 +269,7 @@ async function send(ctx: ToolContext, a: Args) {
     const truncated = /…\[truncated \d+ chars\]$/.test(r.text ?? '');
     return sent(saveText(fileName, r.text ?? '', a.mimeType), truncated ? ' from your laptop (the bridge cut it off at 64 KB)' : ' from your laptop');
   }
-  if (!name) throw new Error('name is required, e.g. "report.csv".');
+  if (!name) throw new Error('name is required, e.g. "notes.md".');
   if (typeof a.text === 'string') return sent(saveText(name, a.text, a.mimeType));
   if (typeof a.base64 === 'string') return sent(saveBase64(name, a.base64, a.mimeType));
   if (typeof a.url === 'string') {
@@ -257,7 +282,11 @@ async function send(ctx: ToolContext, a: Args) {
 
 export const FILE_TOOL_LABELS: Record<string, (a: Args) => string> = {
   'files.send': (a) => `Sent ${a.name || a.fromLaptop || a.fromGithub?.path || 'a file'}`,
-  'files.pdf': (a) => `Made ${String(a.name || 'document').replace(/\.pdf$/i, '')}.pdf`,
+  'files.pdf': (a) => `Made ${withExt(String(a.name || 'document'), 'pdf')}`,
+  'files.xlsx': (a) => `Made ${withExt(String(a.name || 'spreadsheet'), 'xlsx')}`,
+  'files.docx': (a) => `Made ${withExt(String(a.name || 'document'), 'docx')}`,
+  'files.pptx': (a) => `Made ${withExt(String(a.name || 'presentation'), 'pptx')}`,
+  'files.html': (a) => `Made ${String(a.name || 'document').trim().replace(/\.[a-z0-9]{1,5}$/i, '')}.html`,
   'files.image': (a) => `Drew ${a.name || 'an image'}`,
   'files.list': () => 'Looked through your files',
   'files.read': (a) => `Read ${a.id || a.name || 'a file'} from your files`,
@@ -272,7 +301,7 @@ export function fileTools(ctx: ToolContext): Record<string, ToolDef> {
       service: 'files',
       kind: 'read',
       description:
-        'Send the user a file of ANY type (CSV, JSON, code, Markdown, HTML, .ics, .vcf, images, zips…) as a downloadable card in the chat they can open, share, save and forward. Use this whenever the user asks for a file instead of pasting long content. Give exactly one source.',
+        'Send the user a file of ANY type (CSV, JSON, code, Markdown, HTML, .ics, .vcf, images, zips, or a file from their library, GitHub, laptop or a URL) as a downloadable card in the chat they can open, share, save and forward. Use this whenever the user asks for a file instead of pasting long content. Give exactly one source. For PDF, Excel, Word and PowerPoint use files.pdf, files.xlsx, files.docx and files.pptx.',
       params: `{"name":"report.csv","mimeType":"optional",${sources.join(' | ')}}`,
       label: FILE_TOOL_LABELS['files.send'],
       run: (c, a) => send(c, a),
@@ -281,12 +310,64 @@ export function fileTools(ctx: ToolContext): Record<string, ToolDef> {
       service: 'files',
       kind: 'read',
       description:
-        'Make a nicely typeset PDF from Markdown (headings, lists, tables, code, images by URL) or from HTML, and send it to the user. Use for reports, letters, CVs, invoices, worksheets — whenever they ask for a PDF. <div class="page-break"></div> starts a new page.',
+        'Make a nicely typeset PDF from Markdown (headings, lists, tables, code, images by URL) or from HTML, and send it. Use for reports, letters, CVs, invoices, worksheets — whenever they ask for a PDF. <div class="page-break"></div> starts a new page.',
       params: '{"name":"report.pdf","markdown":"# Title…" | "html":"<h1>…</h1>","pageSize":"letter|a4"}',
       label: FILE_TOOL_LABELS['files.pdf'],
       run: async (_c, a) => {
         if (typeof a.markdown !== 'string' && typeof a.html !== 'string') throw new Error('Give "markdown" or "html".');
         return sent(await makePdf(String(a.name || 'document'), { markdown: a.markdown, html: a.html, pageSize: a.pageSize === 'a4' ? 'a4' : 'letter' }));
+      },
+    },
+    'files.xlsx': {
+      service: 'files',
+      kind: 'read',
+      description:
+        'Make a real Excel workbook (.xlsx) and send it: one or more sheets of rows. Cells are text, numbers, booleans or null; text starting with "=" is a formula (e.g. "=SUM(B2:B9)"). The first row is a bold, frozen header with filters unless "header": false. Use for budgets, trackers, tables of data, anything they want in Excel or Google Sheets.',
+      params: '{"name":"budget.xlsx","sheets":[{"name":"Budget","rows":[["Item","Cost"],["Hotel",600],["Total","=SUM(B2:B2)"]],"widths":[24,12]}]}',
+      label: FILE_TOOL_LABELS['files.xlsx'],
+      run: async (_c, a) => {
+        const sheets: Sheet[] = Array.isArray(a.sheets) ? a.sheets : Array.isArray(a.rows) ? [{ name: 'Sheet1', rows: a.rows }] : [];
+        const bytes = makeXlsx(sheets);
+        return sent(saveBytes(withExt(String(a.name || 'spreadsheet'), 'xlsx'), bytes, OFFICE_MIME.xlsx));
+      },
+    },
+    'files.docx': {
+      service: 'files',
+      kind: 'read',
+      description:
+        'Make a real Word document (.docx) from Markdown and send it: headings, paragraphs with **bold**, *italic*, `code` and [links](https://…), bulleted and numbered lists, tables, quotes, code blocks, --- rules and <div class="page-break"></div> page breaks. Use when they want Word or an editable document.',
+      params: '{"name":"letter.docx","markdown":"# Title\n\nText…","title":"optional"}',
+      label: FILE_TOOL_LABELS['files.docx'],
+      run: async (_c, a) => {
+        if (typeof a.markdown !== 'string') throw new Error('Give the document as "markdown".');
+        const bytes = makeDocx(a.markdown, typeof a.title === 'string' ? a.title : undefined);
+        return sent(saveBytes(withExt(String(a.name || 'document'), 'docx'), bytes, OFFICE_MIME.docx));
+      },
+    },
+    'files.pptx': {
+      service: 'files',
+      kind: 'read',
+      description:
+        'Make a real PowerPoint presentation (.pptx) and send it. Each slide has a title and optionally a subtitle, bullets (strings; start one with "  " to indent), body text, a table (rows of cells, first row = header), a chart ({"type":"bar|line|pie|doughnut","labels":[…],"series":[{"name":"…","values":[…]}]}) and speaker notes. "layout":"title" makes a title slide, "section" a section divider. "theme":"dark|light" and an optional "accent" hex colour style the deck. Use when they want slides, a deck or PowerPoint/Keynote/Google Slides.',
+      params: '{"name":"pitch.pptx","title":"optional","theme":"light","accent":"#C2410C","slides":[{"layout":"title","title":"Q3 review","subtitle":"Sales team"},{"title":"Highlights","bullets":["Revenue up 12%","  New region: Lisbon"],"notes":"Say thanks"},{"title":"Revenue","chart":{"type":"bar","labels":["Jul","Aug","Sep"],"series":[{"name":"2026","values":[12,15,18]}]}}]}',
+      label: FILE_TOOL_LABELS['files.pptx'],
+      run: async (_c, a) => {
+        if (!Array.isArray(a.slides) || !a.slides.length) throw new Error('Give "slides": a list of slides.');
+        const deck: Deck = { title: a.title, theme: a.theme === 'dark' ? 'dark' : 'light', accent: a.accent, slides: a.slides };
+        const bytes = await makePptx(deck);
+        return sent(saveBytes(withExt(String(a.name || 'presentation'), 'pptx'), bytes, OFFICE_MIME.pptx));
+      },
+    },
+    'files.html': {
+      service: 'files',
+      kind: 'read',
+      description:
+        'Make a document as ONE self-contained HTML page (inline CSS and JavaScript; opens in the app and any browser, works offline, prints cleanly) and send it as a file. Good for interactive tables, dashboards, web-style reports and slide shows that run in a browser. Give a full page in "html", or "markdown" for a simple document.',
+      params: '{"name":"report.html","html":"<!doctype html>…" | "markdown":"# Title…","title":"optional"}',
+      label: FILE_TOOL_LABELS['files.html'],
+      run: async (_c, a) => {
+        if (typeof a.markdown !== 'string' && typeof a.html !== 'string') throw new Error('Give "html" (a full page) or "markdown".');
+        return sent(makeHtmlDocument(String(a.name || 'document'), { markdown: a.markdown, html: a.html, title: a.title }));
       },
     },
     'files.image': {

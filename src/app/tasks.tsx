@@ -1,5 +1,5 @@
 import { Stack, router } from 'expo-router';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { Icon } from '../components/ui';
 import type { IconName } from '../components/ui';
@@ -9,6 +9,7 @@ import type { Task, TaskKind } from '../lib/tasks';
 import { useTheme } from '../lib/theme';
 import { laptopConnected } from '../lib/tools';
 import { formatElapsed, useTasks, useTicker } from '../lib/useTasks';
+import { Text } from '../components/Text';
 
 const KIND_ICON: Record<TaskKind, IconName> = {
   reply: 'message-circle',

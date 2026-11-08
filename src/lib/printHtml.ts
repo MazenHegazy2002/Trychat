@@ -1,6 +1,7 @@
 /**
- * Markdown → HTML and the print stylesheet for PDFs the assistant makes (files.pdf).
- * Pure functions, no native imports (tested in Node).
+ * Markdown → HTML and the document stylesheet for the HTML documents the assistant makes
+ * (files.html): a clean page on screen that also prints well. Pure functions, no native imports
+ * (tested in Node).
  */
 
 export function escapeHtml(s: string): string {
@@ -319,48 +320,51 @@ export const PAGE_SIZES: Record<PageSize, { width: number; height: number }> = {
   a4: { width: 595, height: 842 },
 };
 
-/** Print stylesheet: the app's warm serif look on white paper. */
+/** Document stylesheet: TryChat's clean sans look on white paper, centred on screen, paginated in print. */
 export const PRINT_CSS = `
 @page { margin: 18mm 17mm; }
-html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-body { font-family: Georgia, 'Noto Serif', 'Times New Roman', serif; font-size: 11.5pt; line-height: 1.55; color: #141413; background: #fff; margin: 0; word-wrap: break-word; overflow-wrap: break-word; }
-h1, h2, h3, h4, h5, h6 { font-family: Georgia, 'Noto Serif', 'Times New Roman', serif; line-height: 1.25; color: #141413; page-break-after: avoid; break-after: avoid; }
-h1 { font-size: 24pt; font-weight: 500; letter-spacing: -0.01em; margin: 0 0 14pt; }
-h2 { font-size: 16pt; font-weight: 600; margin: 22pt 0 8pt; padding-bottom: 4pt; border-bottom: 0.6pt solid rgba(31,30,29,0.18); }
-h3 { font-size: 13pt; font-weight: 600; margin: 16pt 0 6pt; }
-h4, h5, h6 { font-size: 11.5pt; font-weight: 700; margin: 14pt 0 4pt; }
-h1 + h2 { margin-top: 8pt; }
-p { margin: 0 0 9pt; orphans: 3; widows: 3; }
-a { color: #B5532F; text-decoration: none; }
-strong { font-weight: 700; }
-mark { background: #F5E1D6; padding: 0 2pt; }
-del { color: #73726C; }
-code { font-family: 'SF Mono', Menlo, Consolas, 'Roboto Mono', 'Droid Sans Mono', monospace; font-size: 9.5pt; background: #F0EEE6; border-radius: 3px; padding: 0.5pt 3pt; }
-pre { font-family: 'SF Mono', Menlo, Consolas, 'Roboto Mono', 'Droid Sans Mono', monospace; background: #F7F6F1; border: 0.6pt solid rgba(31,30,29,0.14); border-radius: 6px; padding: 9pt 11pt; margin: 0 0 11pt; white-space: pre-wrap; font-size: 9pt; line-height: 1.45; page-break-inside: avoid; break-inside: avoid; }
-pre code { background: none; padding: 0; font-size: inherit; border-radius: 0; }
-blockquote { margin: 0 0 11pt; padding: 1pt 0 1pt 12pt; border-left: 2.5pt solid #D97757; color: #5E5D59; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #fafafa; }
+body { font-family: Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, 'Helvetica Neue', Arial, sans-serif; font-size: 16px; line-height: 1.6; color: #18181b; background: #fff; margin: 0 auto; max-width: 760px; padding: 40px 28px 64px; box-sizing: border-box; word-wrap: break-word; overflow-wrap: break-word; }
+@media screen and (min-width: 820px) { body { margin: 32px auto; border: 1px solid #e4e4e7; border-radius: 14px; } }
+@media print { html { background: #fff; } body { max-width: none; padding: 0; margin: 0; border: 0; font-size: 11pt; } }
+h1, h2, h3, h4, h5, h6 { line-height: 1.25; color: #18181b; font-weight: 600; page-break-after: avoid; break-after: avoid; }
+h1 { font-size: 30px; letter-spacing: -0.02em; margin: 0 0 16px; }
+h2 { font-size: 21px; letter-spacing: -0.01em; margin: 32px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #e4e4e7; }
+h3 { font-size: 17px; margin: 24px 0 8px; }
+h4, h5, h6 { font-size: 15px; margin: 18px 0 6px; }
+h1 + h2 { margin-top: 12px; }
+p { margin: 0 0 12px; orphans: 3; widows: 3; }
+a { color: #c2410c; text-decoration: underline; text-underline-offset: 2px; }
+strong { font-weight: 600; }
+mark { background: #fdede5; padding: 0 3px; border-radius: 3px; }
+del { color: #6b6b74; }
+code { font-family: 'Geist Mono', 'SF Mono', Menlo, Consolas, 'Roboto Mono', monospace; font-size: 0.88em; background: #f1f1f3; border-radius: 6px; padding: 1px 5px; }
+pre { font-family: 'Geist Mono', 'SF Mono', Menlo, Consolas, 'Roboto Mono', monospace; background: #111114; color: #e4e4e7; border-radius: 14px; padding: 14px 16px; margin: 0 0 14px; white-space: pre-wrap; font-size: 13px; line-height: 1.55; page-break-inside: avoid; break-inside: avoid; }
+pre code { background: none; padding: 0; font-size: inherit; border-radius: 0; color: inherit; }
+blockquote { margin: 0 0 14px; padding: 2px 0 2px 14px; border-left: 3px solid #c2410c; color: #52525b; }
 blockquote p:last-child { margin-bottom: 0; }
-ul, ol { margin: 0 0 9pt; padding-left: 20pt; }
-li { margin: 2pt 0; }
-li > ul, li > ol { margin-bottom: 2pt; }
-li.task { list-style: none; margin-left: -15pt; }
-li.task .box { display: inline-block; width: 15pt; font-family: 'Segoe UI Symbol', 'DejaVu Sans', sans-serif; }
-table { border-collapse: collapse; width: 100%; margin: 4pt 0 13pt; font-size: 10pt; line-height: 1.4; }
-th, td { border-bottom: 0.6pt solid rgba(31,30,29,0.16); padding: 5pt 8pt; text-align: left; vertical-align: top; }
-th { font-weight: 600; background: #F0EEE6; border-bottom: 1pt solid rgba(31,30,29,0.35); }
+ul, ol { margin: 0 0 12px; padding-left: 24px; }
+li { margin: 3px 0; }
+li > ul, li > ol { margin-bottom: 3px; }
+li.task { list-style: none; margin-left: -20px; }
+li.task .box { display: inline-block; width: 20px; }
+table { border-collapse: separate; border-spacing: 0; width: 100%; margin: 6px 0 16px; font-size: 14px; line-height: 1.45; border: 1px solid #e4e4e7; border-radius: 14px; overflow: hidden; }
+th, td { border-bottom: 1px solid #e4e4e7; padding: 9px 12px; text-align: left; vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-weight: 600; color: #52525b; background: #f1f1f3; }
 tr { page-break-inside: avoid; break-inside: avoid; }
 thead { display: table-header-group; }
-hr { border: none; border-top: 0.6pt solid rgba(31,30,29,0.25); margin: 18pt 0; }
+hr { border: none; border-top: 1px solid #e4e4e7; margin: 28px 0; }
 img, svg { max-width: 100%; height: auto; }
-figure { margin: 0 0 11pt; } figcaption { color: #5E5D59; font-size: 9.5pt; margin-top: 4pt; }
+figure { margin: 0 0 14px; } figcaption { color: #52525b; font-size: 13px; margin-top: 6px; }
 .page-break { page-break-after: always; break-after: page; height: 0; }
 `;
 
 const looksLikeDocument = (html: string) => /<html[\s>]/i.test(html) || /<!doctype\s+html/i.test(html);
 
 /**
- * A complete HTML document ready for printing. `html` that is already a full document is used as is
- * (the model styled it); fragments and Markdown get the print stylesheet.
+ * A complete HTML document. `html` that is already a full document is used as is (the model styled
+ * it); fragments and Markdown get the document stylesheet.
  */
 export function printableHtml(input: { html?: string; markdown?: string; title?: string; pageSize?: PageSize }): string {
   const { html, markdown, title, pageSize } = input;

@@ -1,34 +1,47 @@
 import { router } from 'expo-router';
-import { ActivityIndicator, Pressable, Text } from 'react-native';
+import { Pressable, View } from 'react-native';
 
-import { useTheme } from '../lib/theme';
+import { RADIUS, SIZE, useTheme } from '../lib/theme';
 import { useTasks } from '../lib/useTasks';
-import { Icon } from './ui';
+import { Text } from './Text';
+import { IconButton, RunningDot } from './ui';
 
-/** Header button to the Tasks screen; shows a spinner and count while tasks run. */
+/**
+ * Header button to Tasks & terminal. While something runs it is a small pill with the Ember dot and
+ * "N running"; idle it is a terminal icon (or nothing, with `hideWhenIdle`).
+ */
 export function TasksPill({ conversationId, hideWhenIdle }: { conversationId?: string; hideWhenIdle?: boolean }) {
   const theme = useTheme();
   const tasks = useTasks();
   const running = tasks.filter((t) => t.status === 'running' && (!conversationId || t.conversationId === conversationId)).length;
   if (!running && hideWhenIdle) return null;
+  if (!running) return <IconButton name="terminal" label="Tasks and terminal" onPress={() => router.push('/tasks')} />;
   return (
     <Pressable
       onPress={() => router.push('/tasks')}
-      hitSlop={8}
+      hitSlop={6}
       accessibilityRole="button"
-      accessibilityLabel={running ? `${running} running task${running === 1 ? '' : 's'}. Open Tasks` : 'Tasks and terminal'}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        minHeight: 32,
-        paddingHorizontal: running ? 10 : 4,
-        borderRadius: 16,
-        backgroundColor: running ? theme.surface2 : 'transparent',
-      }}
+      accessibilityLabel={`${running} running task${running === 1 ? '' : 's'}. Open Tasks`}
+      style={{ minHeight: SIZE.controlMd, justifyContent: 'center' }}
     >
-      {running ? <ActivityIndicator size="small" color={theme.primary} /> : <Icon name="terminal" size={19} color={theme.primary} />}
-      {running > 0 && <Text style={{ color: theme.text, fontSize: 13, fontWeight: '600' }}>{running}</Text>}
+      {({ pressed }) => (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            height: 32,
+            paddingHorizontal: 12,
+            borderRadius: RADIUS.pill,
+            borderWidth: 1,
+            borderColor: theme.border,
+            backgroundColor: pressed ? theme.fill : theme.surfaceRaised,
+          }}
+        >
+          <RunningDot size={8} />
+          <Text style={{ color: theme.ink, fontSize: 13, lineHeight: 18, fontWeight: '500' }}>{running} running</Text>
+        </View>
+      )}
     </Pressable>
   );
 }

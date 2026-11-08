@@ -22,7 +22,7 @@
     "android": {
       "package": "com.trychat.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0A0A0B",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -62,10 +62,25 @@
       [
         "expo-notifications",
         {
-          "color": "#E6F4FE"
+          "color": "#FF7A45"
         }
       ],
-      "./plugins/withBackgroundService"
-    ]
+      "./plugins/withBackgroundService",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0A0A0B",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 96,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#0A0A0B",
+            "image": "./assets/splash-icon.png"
+          }
+        }
+      ]
+    ],
+    "backgroundColor": "#0A0A0B"
   }
 }

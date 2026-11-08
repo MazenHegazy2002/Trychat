@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
 
+import { desktopFs } from '../desktop';
 import { uid } from '../id';
 import type { Workspace } from './core';
 
@@ -39,7 +40,14 @@ export function patchWorkspace(id: string, patch: Partial<Workspace>): Workspace
   return out;
 }
 
-export const removeWorkspace = (id: string) => commit(list.filter((w) => w.id !== id));
+export function removeWorkspace(id: string) {
+  const gone = list.find((w) => w.id === id);
+  commit(list.filter((w) => w.id !== id));
+  // A computer folder stays reachable only while some workspace still uses it.
+  if (gone?.kind === 'computer' && gone.root && !list.some((w) => w.kind === 'computer' && w.root === gone.root)) {
+    desktopFs?.forget(gone.root).catch(() => undefined);
+  }
+}
 
 function subscribe(l: () => void) {
   listeners.add(l);

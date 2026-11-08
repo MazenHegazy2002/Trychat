@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ClaySwitch, Icon, PillButton } from './ui';
 import type { ToolApproval } from '../lib/store';
@@ -8,6 +8,7 @@ import { parseRef, previewInstall, refName } from '../lib/storeTools';
 import type { InstallField, InstallPreview } from '../lib/storeTools';
 import { useTheme } from '../lib/theme';
 import type { ToolCall } from '../lib/types';
+import { Text, TextInput } from './Text';
 
 interface Props {
   call: ToolCall;

@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { useStore } from '../lib/store';
@@ -9,6 +9,7 @@ import { listUserRepos, normalizeRepo, repoInfo, type RepoInfo } from '../lib/gi
 import { appPhoneFolder, checkPhoneFolder, phoneFolderSupported, pickPhoneFolder } from '../lib/phoneTools';
 import { githubWhoAmI, laptopInfo, normalizeBridgeUrl } from '../lib/tools';
 import type { Settings } from '../lib/types';
+import { Text, TextInput } from '../components/Text';
 
 const BRIDGE_COMMAND = 'node bridge/trychat-bridge.mjs --root=~/Projects';
 

@@ -1,9 +1,10 @@
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 
 import type { SlashCommand } from '../lib/plugins';
 import { useTheme } from '../lib/theme';
 import { Divider, Icon } from './ui';
+import { Text } from './Text';
 
 /** Monospace face that exists on both platforms ("monospace" alone falls back to the system font on iOS). */
 export const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });

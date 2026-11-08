@@ -37,11 +37,11 @@ function serve(request) {
 function createWindow() {
   const win = new BrowserWindow({
     title: 'TryChat',
-    width: 1100,
-    height: 780,
+    width: 1280,
+    height: 820,
     minWidth: 380,
     minHeight: 500,
-    backgroundColor: '#FAF9F5',
+    backgroundColor: '#0A0A0B',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -161,6 +161,168 @@ ipcMain.handle('file:save', async (event, name, bytes) => {
   if (canceled || !filePath) return null;
   fs.writeFileSync(filePath, Buffer.from(bytes));
   return filePath;
+});
+
+// ---- folders on this computer (workspaces) ----
+// The app can only touch folders the user picked in the "Open a folder" dialog; the list is kept in
+// userData/folders.json. Every path is resolved inside one of those folders, and symlinks that lead
+// outside are refused.
+const fsp = fs.promises;
+const FOLDERS_FILE = () => path.join(app.getPath('userData'), 'folders.json');
+const SKIP_DIRS = /^(\.git|node_modules|dist|build|\.expo|\.next|__pycache__|\.venv|venv)$/;
+
+function approvedFolders() {
+  try {
+    const list = JSON.parse(fs.readFileSync(FOLDERS_FILE(), 'utf8'));
+    return Array.isArray(list) ? list.filter((p) => typeof p === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function setApprovedFolders(list) {
+  fs.mkdirSync(path.dirname(FOLDERS_FILE()), { recursive: true });
+  fs.writeFileSync(FOLDERS_FILE(), JSON.stringify([...new Set(list)], null, 2));
+}
+
+const outside = (base, target) => {
+  const rel = path.relative(base, target);
+  return rel.startsWith('..') || path.isAbsolute(rel);
+};
+
+/** The absolute path of `rel` inside the approved folder `root`. */
+async function inside(root, rel) {
+  const base = path.resolve(String(root || ''));
+  if (!approvedFolders().includes(base)) throw new Error('That folder isn’t open in TryChat. Open it again from Workspaces.');
+  const target = path.resolve(base, String(rel || '').replace(/^[\\/]+/, ''));
+  if (outside(base, target)) throw new Error('That path is outside the folder.');
+  // The nearest existing part of the path must really be inside the folder (no symlink escapes).
+  const realBase = await fsp.realpath(base);
+  for (let probe = target; ; probe = path.dirname(probe)) {
+    try {
+      if (outside(realBase, await fsp.realpath(probe))) throw new Error('That path is outside the folder.');
+      break;
+    } catch (e) {
+      if (e.code !== 'ENOENT' || path.dirname(probe) === probe) throw e;
+    }
+  }
+  return target;
+}
+
+const handleFs = (channel, fn) =>
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!fromApp(event)) throw new Error('Not allowed');
+    return fn(event, ...args);
+  });
+
+handleFs('fs:pickFolder', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Open a folder', properties: ['openDirectory', 'createDirectory'] });
+  if (canceled || !filePaths[0]) return null;
+  const dir = path.resolve(filePaths[0]);
+  setApprovedFolders([...approvedFolders(), dir]);
+  return { path: dir, name: path.basename(dir) || dir };
+});
+
+handleFs('fs:forget', async (_event, root) => {
+  const base = path.resolve(String(root || ''));
+  setApprovedFolders(approvedFolders().filter((p) => p !== base));
+});
+
+handleFs('fs:list', async (_event, root, rel) => {
+  const dir = await inside(root, rel);
+  const entries = await fsp.readdir(dir, { withFileTypes: true });
+  const out = await Promise.all(
+    entries.map(async (e) => {
+      try {
+        const st = await fsp.stat(path.join(dir, e.name));
+        return { name: e.name, isDir: st.isDirectory(), size: st.isDirectory() ? undefined : st.size };
+      } catch {
+        return null; // a broken link
+      }
+    }),
+  );
+  return out.filter(Boolean);
+});
+
+handleFs('fs:read', async (_event, root, rel) => {
+  const file = await inside(root, rel);
+  const st = await fsp.stat(file);
+  if (st.isDirectory()) throw new Error(`${rel} is a folder.`);
+  if (st.size > 2 * 1024 * 1024) return { tooBig: true, size: st.size };
+  const buf = await fsp.readFile(file);
+  if (buf.includes(0)) return { binary: true, size: st.size };
+  return { content: buf.toString('utf8'), size: st.size };
+});
+
+handleFs('fs:write', async (_event, root, rel, content) => {
+  const file = await inside(root, rel);
+  await fsp.mkdir(path.dirname(file), { recursive: true });
+  const data = Buffer.from(String(content ?? ''), 'utf8');
+  await fsp.writeFile(file, data);
+  return { bytes: data.length };
+});
+
+handleFs('fs:delete', async (_event, root, rel) => {
+  const target = await inside(root, rel);
+  if (target === path.resolve(String(root))) throw new Error('The folder itself can’t be deleted from here.');
+  await fsp.rm(target, { recursive: true });
+});
+
+handleFs('fs:rename', async (_event, root, from, to) => {
+  const a = await inside(root, from);
+  const b = await inside(root, to);
+  await fsp.mkdir(path.dirname(b), { recursive: true });
+  await fsp.rename(a, b);
+});
+
+handleFs('fs:mkdir', async (_event, root, rel) => {
+  await fsp.mkdir(await inside(root, rel), { recursive: true });
+});
+
+handleFs('fs:search', async (_event, root, query) => {
+  const base = await inside(root, '');
+  const q = String(query || '').toLowerCase();
+  if (!q) return [];
+  const out = [];
+  let seen = 0;
+  async function walk(dir) {
+    if (out.length >= 120 || seen > 5000) return;
+    let entries;
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (out.length >= 120 || seen > 5000) return;
+      seen++;
+      if (SKIP_DIRS.test(e.name) || e.isSymbolicLink()) continue;
+      const abs = path.join(dir, e.name);
+      const rel = path.relative(base, abs).split(path.sep).join('/');
+      if (e.name.toLowerCase().includes(q)) out.push(rel + (e.isDirectory() ? '/' : ''));
+      if (e.isDirectory()) await walk(abs);
+      else {
+        try {
+          const st = await fsp.stat(abs);
+          if (st.size >= 300000) continue;
+          const text = await fsp.readFile(abs, 'utf8');
+          if (text.includes('\u0000')) continue;
+          text.split('\n').forEach((line, i) => {
+            if (out.length < 120 && line.toLowerCase().includes(q)) out.push(`${rel}:${i + 1}: ${line.trim().slice(0, 160)}`);
+          });
+        } catch {
+          // unreadable file
+        }
+      }
+    }
+  }
+  await walk(base);
+  return out;
+});
+
+handleFs('fs:reveal', async (_event, root, rel) => {
+  shell.showItemInFolder(await inside(root, rel));
 });
 
 function buildMenu() {

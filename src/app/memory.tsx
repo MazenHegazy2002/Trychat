@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TextPrompt } from '../components/TextPrompt';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { Memory } from '../lib/types';
+import { Text } from '../components/Text';
 
 export default function MemoryScreen() {
   const theme = useTheme();

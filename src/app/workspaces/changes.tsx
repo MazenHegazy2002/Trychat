@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, View } from 'react-native';
 
 import { DiffView } from '../../components/CodeView';
 import { Card, ClaySwitch, PillButton, SectionLabel } from '../../components/ui';
@@ -10,6 +10,7 @@ import { wsReadBase } from '../../lib/workspace/backends';
 import type { DiffLine } from '../../lib/workspace/core';
 import { commitChangeset, ConflictError, diffLines, hunks } from '../../lib/workspace/core';
 import { patchWorkspace, useWorkspace } from '../../lib/workspace/store';
+import { Text, TextInput } from '../../components/Text';
 
 export default function ChangesScreen() {
   const theme = useTheme();

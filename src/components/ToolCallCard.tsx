@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { DesignToolCard } from './DesignViews';
 import { InstallCard } from './InstallCard';
@@ -8,6 +8,7 @@ import { useTheme } from '../lib/theme';
 import { toolLabel, toolService } from '../lib/tools';
 import type { ToolApproval } from '../lib/store';
 import type { ToolCall } from '../lib/types';
+import { Text } from './Text';
 
 interface Props {
   call: ToolCall;

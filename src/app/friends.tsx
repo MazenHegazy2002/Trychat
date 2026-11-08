@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { FileCards } from '../components/FileCards';
@@ -23,6 +23,7 @@ import {
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { Account, Attachment, Friend, SharedFile } from '../lib/types';
+import { Text, TextInput } from '../components/Text';
 
 function timeAgo(ts?: number) {
   if (!ts) return '';

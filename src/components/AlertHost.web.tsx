@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, View } from 'react-native';
 import type { AlertButton } from 'react-native';
 
 import { useTheme } from '../lib/theme';
+import { Text } from './Text';
 
 /**
  * react-native-web's Alert.alert does nothing, and the app relies on it for confirmations

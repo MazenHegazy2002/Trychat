@@ -10,8 +10,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,6 +33,7 @@ import { useStore } from '../../lib/store';
 import { githubConnected, laptopConnected } from '../../lib/tools';
 import { useTheme } from '../../lib/theme';
 import type { Attachment, ChatMessage } from '../../lib/types';
+import { Text, TextInput } from '../../components/Text';
 
 const SUGGESTIONS = [
   'Build me a to-do list app',

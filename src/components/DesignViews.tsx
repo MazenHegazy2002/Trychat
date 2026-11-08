@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useMemo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { HtmlView } from './HtmlView';
 import { Icon } from './ui';
@@ -10,6 +10,7 @@ import type { Board } from '../lib/designs';
 import { useTheme } from '../lib/theme';
 import { toolLabel } from '../lib/tools';
 import type { ToolCall } from '../lib/types';
+import { Text } from './Text';
 
 /** A non-interactive rendering of a board, scaled to fit its box. */
 export function BoardThumb({ board, height = 160 }: { board?: Board; height?: number }) {

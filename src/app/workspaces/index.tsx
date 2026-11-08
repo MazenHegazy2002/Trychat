@@ -1,6 +1,6 @@
 import { Stack, router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Card, Icon, PillButton, ScreenIntro, SectionLabel } from '../../components/ui';
 import { listUserRepos, normalizeRepo, repoInfo } from '../../lib/github';
@@ -10,6 +10,7 @@ import { laptopConnected } from '../../lib/tools';
 import { describeWorkspace } from '../../lib/workspace/backends';
 import { branchHead, listBranches } from '../../lib/workspace/core';
 import { addWorkspace, removeWorkspace, useWorkspaces } from '../../lib/workspace/store';
+import { Text, TextInput } from '../../components/Text';
 
 export default function WorkspacesScreen() {
   const theme = useTheme();

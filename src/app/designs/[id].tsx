@@ -1,6 +1,6 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View, useColorScheme } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HtmlView } from '../../components/HtmlView';
@@ -16,6 +16,7 @@ import { uid } from '../../lib/id';
 import { useStore } from '../../lib/store';
 import { useTheme } from '../../lib/theme';
 import type { Attachment } from '../../lib/types';
+import { Text, TextInput } from '../../components/Text';
 
 /** Last pan/zoom per design, so rebuilding the canvas (new boards, coming back) keeps the view. */
 const lastView = new Map<string, { x: number; y: number; k: number }>();

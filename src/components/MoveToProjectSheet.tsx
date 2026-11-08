@@ -1,10 +1,11 @@
 import { router } from 'expo-router';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { Icon } from './ui';
+import { Text } from './Text';
 
 /** Bottom sheet to put a chat in a project (or take it out). */
 export function MoveToProjectSheet({ conversationId, onClose }: { conversationId: string | null; onClose: () => void }) {

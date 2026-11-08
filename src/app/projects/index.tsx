@@ -1,11 +1,12 @@
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Card, Divider, Icon, ScreenIntro, SectionLabel } from '../../components/ui';
 import { useStore } from '../../lib/store';
 import { useTheme } from '../../lib/theme';
+import { Text, TextInput } from '../../components/Text';
 
 export default function ProjectsScreen() {
   const theme = useTheme();

@@ -216,7 +216,7 @@ export function getTools(ctx: ToolContext): Record<string, ToolDef> {
       service: 'code',
       kind: 'code',
       description:
-        'Run JavaScript or Python on the phone and get the printed output (sandboxed; Python has numpy/pandas/matplotlib via Pyodide; no access to the user\'s files). Use it to calculate, test code, or check data. To send the user a file (a chart PNG, CSV, Excel, JSON…), call saveFile(name, data, mimeType?) — in JS data can be a string, bytes, Blob or a <canvas> (draw charts with document.createElement("canvas")); in Python save_file(name, data) takes str, bytes, a matplotlib figure or a pandas DataFrame, and matplotlib charts left open are sent as PNGs automatically.',
+        'Run JavaScript or Python on the phone and get the printed output (sandboxed; Python has numpy/pandas/matplotlib via Pyodide; no access to the user\'s files). Use it to calculate, test code, or check data. To send the user a file (a chart PNG, CSV, Excel, an .html page, JSON…), call saveFile(name, data, mimeType?) — in JS data can be a string, bytes, Blob or a <canvas> (draw charts with document.createElement("canvas")); in Python save_file(name, data) takes str, bytes, a matplotlib figure or a pandas DataFrame (CSV, Excel for .xlsx, a styled table for .html), and matplotlib charts left open are sent as PNGs automatically. For Excel, Word, PowerPoint and PDF files prefer files.xlsx, files.docx, files.pptx and files.pdf.',
       params: '{"language":"python|javascript","code":"print(2**10)"}',
       label: (a) => `Ran ${normalizeLanguage(a.language ?? '') ?? 'code'}`,
       run: async (_c, a) => {

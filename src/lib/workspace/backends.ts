@@ -1,3 +1,5 @@
+import { desktopFs } from '../desktop';
+import type { DesktopFs } from '../desktop';
 import { phoneFs, phoneTools } from '../phoneTools';
 import { normalizeBridgeUrl } from '../tools';
 import type { Settings } from '../types';
@@ -17,7 +19,7 @@ import {
 } from './core';
 import { getWorkspace, patchWorkspace } from './store';
 
-/** One interface over GitHub (staged), laptop (bridge) and phone (direct) workspaces. */
+/** One interface over GitHub (staged), laptop (bridge), phone and computer (direct) workspaces. */
 
 async function bridge(s: Settings, path: string, body: unknown) {
   if (!s.bridgeUrl || !s.bridgeToken) throw new Error('The laptop isn’t connected (Connections → Laptop).');
@@ -48,10 +50,23 @@ function phone(s: Settings) {
 
 const fresh = (ws: Workspace) => getWorkspace(ws.id) ?? ws;
 
+/** A folder on this computer, through the desktop app (Windows or Mac). */
+function computer(ws: Workspace): { fs: DesktopFs; root: string } {
+  if (!desktopFs) throw new Error('This folder is on a computer. Open it in TryChat for Windows or Mac.');
+  if (!ws.root) throw new Error('This workspace has no folder.');
+  return { fs: desktopFs, root: ws.root };
+}
+
 export async function wsList(s: Settings, ws: Workspace, dir: string): Promise<Entry[]> {
   dir = normPath(dir);
   if (ws.kind === 'github') return ghList(s, fresh(ws), dir);
   if (ws.kind === 'phone') return phone(s).list(dir);
+  if (ws.kind === 'computer') {
+    const { fs, root } = computer(ws);
+    return (await fs.list(root, dir))
+      .map((e) => ({ name: e.name, path: joinPath(dir, e.name), isDir: e.isDir, size: e.size }))
+      .sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name));
+  }
   const r = await bridge(s, '/list', { path: lp(ws, dir) });
   return (r.entries as string[])
     .map((e) => {
@@ -67,6 +82,13 @@ export async function wsRead(s: Settings, ws: Workspace, path: string): Promise<
   if (!path) throw new Error('Missing "path".');
   if (ws.kind === 'github') return ghRead(s, fresh(ws), path);
   if (ws.kind === 'phone') return phone(s).read(path);
+  if (ws.kind === 'computer') {
+    const { fs, root } = computer(ws);
+    const r = await fs.read(root, path);
+    if (r.binary) throw new Error(`${path} is a binary file.`);
+    if (r.tooBig) throw new Error(`${path} is too big to edit here (${r.size} bytes).`);
+    return r.content ?? '';
+  }
   const r = await bridge(s, '/read', { path: lp(ws, path), length: 2 * 1024 * 1024 });
   if (r.binary) throw new Error(`${path} is a binary file.`);
   if (typeof r.size === 'number' && r.end < r.size) throw new Error(`${path} is too big to edit here (${r.size} bytes).`);
@@ -90,6 +112,11 @@ export async function wsWrite(s: Settings, ws: Workspace, path: string, content:
     const t = phoneTools({ settings: s, skills: [], mcpServers: [], mcpTools: {} })['phone.write'];
     return String(await t.run({ settings: s, skills: [], mcpServers: [], mcpTools: {} }, { path, content }));
   }
+  if (ws.kind === 'computer') {
+    const { fs, root } = computer(ws);
+    const r = await fs.write(root, path, content);
+    return `Wrote ${r.bytes} bytes to ${path}.`;
+  }
   const r = await bridge(s, '/write', { path: lp(ws, path), content });
   return `Wrote ${r.bytes} bytes to ${path} on the laptop.`;
 }
@@ -104,6 +131,11 @@ export async function wsDelete(s: Settings, ws: Workspace, path: string): Promis
   }
   if (ws.kind === 'phone') {
     phone(s).remove(path);
+    return `Deleted ${path}.`;
+  }
+  if (ws.kind === 'computer') {
+    const { fs, root } = computer(ws);
+    await fs.remove(root, path);
     return `Deleted ${path}.`;
   }
   await laptopNode(s, '.', `require('fs').rmSync(${JSON.stringify(lp(ws, path))},{recursive:true})`);
@@ -124,6 +156,11 @@ export async function wsRename(s: Settings, ws: Workspace, from: string, to: str
     phone(s).remove(from);
     return `Renamed ${from} → ${to}.`;
   }
+  if (ws.kind === 'computer') {
+    const { fs, root } = computer(ws);
+    await fs.rename(root, from, to);
+    return `Renamed ${from} → ${to}.`;
+  }
   await laptopNode(s, '.', `const f=require('fs'),p=require('path');f.mkdirSync(p.dirname(${JSON.stringify(lp(ws, to))}),{recursive:true});f.renameSync(${JSON.stringify(lp(ws, from))},${JSON.stringify(lp(ws, to))})`);
   return `Renamed ${from} → ${to}.`;
 }
@@ -133,6 +170,11 @@ export async function wsMkdir(s: Settings, ws: Workspace, path: string): Promise
   if (ws.kind === 'github') return wsWrite(s, ws, `${path}/.gitkeep`, ''); // git has no empty folders
   if (ws.kind === 'phone') {
     phone(s).mkdir(path);
+    return `Created ${path}/.`;
+  }
+  if (ws.kind === 'computer') {
+    const { fs, root } = computer(ws);
+    await fs.mkdir(root, path);
     return `Created ${path}/.`;
   }
   await laptopNode(s, '.', `require('fs').mkdirSync(${JSON.stringify(lp(ws, path))},{recursive:true})`);
@@ -159,6 +201,10 @@ export async function wsSearch(s: Settings, ws: Workspace, query: string): Promi
     }
     return out;
   }
+  if (ws.kind === 'computer') {
+    const { fs, root } = computer(ws);
+    return fs.search(root, q);
+  }
   const script = `const f=require('fs'),p=require('path');const q=${JSON.stringify(q.toLowerCase())};const out=[];let n=0;
 function walk(d){if(out.length>=120||n>5000)return;let es;try{es=f.readdirSync(d,{withFileTypes:true})}catch{return}
 for(const e of es){n++;if(/^(\\.git|node_modules|dist|build|\\.expo)$/.test(e.name))continue;const r=p.join(d,e.name);const rel=p.relative('.',r).split(p.sep).join('/');
@@ -170,7 +216,7 @@ walk('.');console.log(out.join('\\n'))`;
 
 export async function wsDiffText(s: Settings, ws: Workspace, only?: string): Promise<string> {
   const cur = fresh(ws);
-  if (cur.kind !== 'github') return 'Laptop and phone workspaces save files directly, so there is nothing staged.';
+  if (cur.kind !== 'github') return 'Laptop, phone and computer folders save files directly, so there is nothing staged.';
   const entries = Object.entries(cur.changes).filter(([p]) => !only || p === only || p.startsWith(`${only}/`));
   if (!entries.length) return 'No staged changes.';
   const parts: string[] = [];
@@ -184,6 +230,7 @@ export async function wsDiffText(s: Settings, ws: Workspace, only?: string): Pro
 export function describeWorkspace(ws: Workspace): string {
   if (ws.kind === 'github') return `GitHub ${ws.repo} @ ${ws.branch}`;
   if (ws.kind === 'laptop') return `Laptop folder ${ws.root ? `“${ws.root}”` : '(bridge root)'}`;
+  if (ws.kind === 'computer') return `Folder “${ws.root}” on this computer`;
   return 'Phone folder';
 }
 

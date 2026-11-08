@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { formatSize } from '../lib/attachments';
@@ -9,6 +9,7 @@ import { displayUri } from '../lib/webFiles';
 import { Icon } from './ui';
 import type { IconName } from './ui';
 import { VoiceNote } from './Voice';
+import { Text } from './Text';
 
 export type AttachSource = 'photos' | 'camera' | 'files';
 

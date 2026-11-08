@@ -21,6 +21,9 @@ Then return ONE complete, self-contained HTML file (inline CSS and JavaScript, C
 it runs right in the chat, so don't paste the code again or explain it line by line. Make UIs mobile-friendly.
 Never wrap an ordinary answer in HTML.`;
 
+/** Which tool makes which kind of file (the user wants every type, like Claude). */
+const FILE_FORMATS = `When the user wants a file, make it in the format they ask for, as a real file card: PDF → files.pdf; Excel or a spreadsheet → files.xlsx (formulas work); Word or an editable document → files.docx; PowerPoint, slides or a deck → files.pptx; a web page or interactive document → files.html; images → files.image; anything else (CSV, JSON, code, Markdown, .ics, .vcf…) → files.send. If they don't name a format, pick the natural one (numbers and tables → Excel, a presentation → PowerPoint, a formal document → PDF or Word). Write complete, polished content, not placeholders.`;
+
 /** Max characters of project files put into the prompt (keeps requests within model limits). */
 const MAX_PROJECT_FILE_CHARS = 60_000;
 
@@ -47,6 +50,7 @@ export function buildSystemPrompt(ctx: ToolContext, memories: Memory[], project?
   const parts = [settings.systemPrompt.trim()];
   if (project) parts.push(projectSection(project));
   if (settings.builderMode) parts.push(BUILDER_INSTRUCTIONS);
+  parts.push(FILE_FORMATS);
   if (settings.memoryEnabled) {
     parts.push(MEMORY_INSTRUCTIONS);
     parts.push(

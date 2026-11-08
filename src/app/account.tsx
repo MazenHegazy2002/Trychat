@@ -1,6 +1,6 @@
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Card, Divider, Icon, PillButton, SectionLabel } from '../components/ui';
@@ -8,6 +8,7 @@ import type { IconName } from '../components/ui';
 import * as storage from '../lib/storage';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
+import { Text, TextInput } from '../components/Text';
 
 const DEFAULT_SERVER = process.env.EXPO_PUBLIC_SYNC_SERVER_URL ?? 'http://169.58.133.158:8787';
 

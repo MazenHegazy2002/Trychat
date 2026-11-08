@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { listModels } from '../lib/api';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { Text, TextInput } from './Text';
 
 interface Props {
   visible: boolean;

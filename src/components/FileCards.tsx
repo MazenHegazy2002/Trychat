@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -15,6 +15,7 @@ import { HtmlView } from './HtmlView';
 import { ShareToFriendSheet } from './ShareToFriendSheet';
 import { Icon } from './ui';
 import type { IconName } from './ui';
+import { Text } from './Text';
 
 const ICONS: Record<FileGroup, IconName> = {
   image: 'image',

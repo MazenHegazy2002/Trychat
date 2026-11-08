@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,6 +11,7 @@ import type { SkillCandidate } from '../lib/skills';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { Skill } from '../lib/types';
+import { Text, TextInput } from '../components/Text';
 
 const blankSkill = (): Skill => ({ id: uid(), name: '', description: '', instructions: '', enabled: true, updatedAt: Date.now() });
 

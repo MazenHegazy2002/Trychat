@@ -1,7 +1,7 @@
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, BackHandler, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -27,6 +27,7 @@ import type { SkillCandidate } from '../lib/skills';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { Plugin } from '../lib/types';
+import { Text, TextInput } from '../components/Text';
 
 type Tab = 'plugins' | 'skills' | 'mcp';
 

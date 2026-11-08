@@ -8,12 +8,13 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';  
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { useTheme } from '../lib/theme';
 import type { Attachment } from '../lib/types';
 import { displayUri } from '../lib/webFiles';
 import { Icon } from './ui';
+import { Text } from './Text';
 
 export const MAX_VOICE_MS = 5 * 60 * 1000;
 

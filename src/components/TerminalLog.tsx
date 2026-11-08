@@ -1,6 +1,7 @@
 import { useMemo, useRef } from 'react';
-import { Platform, ScrollView, Text } from 'react-native';
+import { Platform, ScrollView } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
+import { Text } from './Text';
 
 export const TERM = { bg: '#141413', fg: '#E8E6DC', dim: '#9C9A92', err: '#F2B8B5', prompt: '#8FD18F' };
 export const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'ui-monospace, Menlo, Consolas, monospace' });

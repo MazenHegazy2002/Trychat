@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { Card, Chip, ClaySwitch, Divider, Icon, IconTile, PillButton, ScreenIntro, SectionLabel, TextAction } from '../components/ui';
@@ -10,6 +10,7 @@ import { mcpTransport } from '../lib/mcp';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import type { McpServer } from '../lib/types';
+import { Text, TextInput } from '../components/Text';
 
 /** Host of a URL without credentials or query (plugin URLs can carry secrets). */
 const hostOf = (url: string) => url.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?([^/?#]+)/i)?.[1] ?? url;

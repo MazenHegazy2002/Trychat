@@ -1,6 +1,6 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { TextPrompt } from '../../components/TextPrompt';
 import { Icon, PillButton } from '../../components/ui';
@@ -10,6 +10,7 @@ import { describeWorkspace, wsDelete, wsList, wsMkdir, wsRename, wsSearch, wsWri
 import type { Entry } from '../../lib/workspace/core';
 import { branchHead, joinPath } from '../../lib/workspace/core';
 import { patchWorkspace, useWorkspace } from '../../lib/workspace/store';
+import { Text, TextInput } from '../../components/Text';
 
 type PromptKind = { kind: 'file' | 'folder' } | { kind: 'rename'; entry: Entry } | null;
 

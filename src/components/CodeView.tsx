@@ -1,7 +1,8 @@
 import { memo } from 'react';
-import { FlatList, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Platform, ScrollView, StyleSheet, View } from 'react-native';
 
 import type { DiffLine } from '../lib/workspace/core';
+import { Text } from './Text';
 
 /** Monospace code with line numbers and light regex syntax highlighting (dark code palette). */
 

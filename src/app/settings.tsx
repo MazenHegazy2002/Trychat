@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { ModelPicker } from '../components/ModelPicker';
@@ -11,6 +11,7 @@ import { useStore } from '../lib/store';
 import { githubConnected, laptopConnected } from '../lib/tools';
 import { useTheme } from '../lib/theme';
 import type { Settings } from '../lib/types';
+import { Text, TextInput } from '../components/Text';
 
 export default function SettingsScreen() {
   const theme = useTheme();
