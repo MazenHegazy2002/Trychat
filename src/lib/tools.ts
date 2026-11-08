@@ -458,8 +458,24 @@ function scanToolBlocks(text: string): ToolBlock[] {
   return blocks;
 }
 
+/**
+ * Repairs tool tags some models (Gemini, Llama…) write slightly wrong, so the call still runs instead of
+ * showing as raw text: `<tool name="x":{…}</tool>`, `<tool name="x" {…}</tool>`, `<tool name=x>`,
+ * `<tool:x>{…}</tool>`, `<tool_call name="x">…</tool_call>` and a missing `</tool>` after the JSON.
+ */
+export function normalizeToolSyntax(text: string): string {
+  return text
+    .replace(/<(\/?)tool_call\b/gi, '<$1tool')
+    .replace(/<tool:([\w.\-]+)\s*>/gi, '<tool name="$1">')
+    .replace(/<tool\s+name\s*=\s*([\w.\-]+)\s*>/gi, '<tool name="$1">')
+    .replace(/<tool\s+name\s*=\s*(["'])([\w.\-]+)\1\s*[:,]?\s*(?=\{)/gi, '<tool name="$2">')
+    .replace(/(<tool name="[\w.\-]+">\s*\{[^<]*\})\s*<\/?\s*(?!\/?tool)/g, '$1</tool><')
+    .replace(/(<tool name="[\w.\-]+">\s*\{[^<]*\})\s*$/g, '$1</tool>');
+}
+
 /** Finds the first complete tool block in the model's reply. */
-export function parseToolCall(text: string, ctx: ToolContext): { call: ToolCall | null; before: string } {
+export function parseToolCall(rawText: string, ctx: ToolContext): { call: ToolCall | null; before: string } {
+  const text = normalizeToolSyntax(rawText);
   const blocks = scanToolBlocks(text).filter((b) => b.closed);
   const block = blocks[0];
   if (!block) return { call: null, before: text };
@@ -478,7 +494,8 @@ export function parseToolCall(text: string, ctx: ToolContext): { call: ToolCall 
 }
 
 /** Removes tool blocks, including one still streaming, from text shown to the user. Examples in code are kept. */
-export function stripToolTags(text: string): string {
+export function stripToolTags(rawText: string): string {
+  const text = normalizeToolSyntax(rawText);
   let out = '';
   let pos = 0;
   for (const b of scanToolBlocks(text)) {
